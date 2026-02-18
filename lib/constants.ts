@@ -1,0 +1,213 @@
+import type { FollowUpStep } from '@/lib/types';
+
+export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Agri-Buddy';
+export const MAX_LISTEN_MS = 120000;
+export const BREATHING_MS = 1500;
+export const SK_RECORDS = 'agri-buddy-records';
+export const SK_SESSION = 'agri-buddy-last-session';
+export const SK_DEEP_CLEANED = 'agri-buddy-deep-cleaned-v1';
+export const DEFAULT_LOC = '';
+export const LOCATION_OPTIONS = ['ハウスA', 'ハウスB', '山の畑', '露地', 'その他'] as const;
+export const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
+
+/* ── Card hierarchy ── */
+export const GLASS = 'bg-stone-50/85 backdrop-blur-xl border border-stone-200/20 shadow-lg';
+export const CARD_FLAT = 'bg-white/60 backdrop-blur-sm border border-stone-100/40';
+export const CARD_ACCENT = 'bg-gradient-to-br from-amber-50/90 to-orange-50/80 border border-amber-200/30';
+export const CARD_INSET = 'bg-stone-50/40 border border-stone-200/30 shadow-inner';
+
+/* ── Voice command patterns ── */
+export const SKIP_RE = /(スキップ|なし|ない|いいえ|いえ|特にない|ありません|パス|とくにない|なかった)/i;
+export const PHOTO_RE = /写真|カメラ|撮って|撮影|撮るよ/;
+export const DONE_RE = /以上です|いじょうです|以上|終わり|おわり|終了|しゅうりょう/;
+export const CONFIRM_RE = /確定|かくてい|次へ|つぎへ|OK|オッケー|オーケー|送信|そうしん|決定|けってい|完了|かんりょう|できた/;
+export const SOS_RE = /しんどい|辞めたい|やめたい|つらい|辛い|きつい|限界|助けて|もう無理|逃げたい|潰れ|SOS|疲れた|つかれた|だるい|やる気.*ない/i;
+export const GENERIC_ADVICE_RE = /詳細を追加すると|次回の入力で傾向分析/;
+
+/* ── Agricultural term correction dictionary ── */
+export const AGRI_CORRECTIONS: [RegExp, string][] = [
+  [/感謝/, '換気'], [/剣定|選定/, '剪定'], [/接ぎ|席/, '施肥'],
+  [/果樹園|貸主/, '灌水'], [/監視|関数/, '灌水'], [/観水|完水/, '灌水'],
+  [/飛行|比較/, '肥料'], [/視界|しかい|指揮/, '資材'],
+  [/燃料日|ねんりょうひ/, '燃料費'], [/格差|日格差/, '日較差'],
+  [/車庫|社交/, '遮光'],
+  [/貝殻虫/, 'カイガラムシ'], [/うどん粉/, 'うどんこ病'],
+  [/白い粉/, 'うどんこ病'], [/灰色カビ/, '灰色かび病'],
+  [/あぶら虫/, 'アブラムシ'], [/油虫/, 'アブラムシ'],
+  [/びわ|ビワ|琵琶/, '枇杷'], [/摘下/, '摘果'],
+  [/線定|洗定/, '剪定'], [/市場|至宝/, '施肥'], [/殺菌際/, '殺菌剤'],
+  [/線香/, '選果'], [/用燐|ようりん/, 'ようりん'],
+  [/再配|さいはい/, '栽培'], [/転園|てんえん/, '点検'], [/正規|せいき/, '生育'],
+  [/麦茶ハウス/, 'ハウス'],
+  [/ビバハウス|ビーバーハウス/, '枇杷ハウス'],
+  [/期日(?!まで)/, '気温'], [/湿温度/, '湿度'],
+  [/散歩(?!し|に|で|へ)/, '散布'],
+  [/お昼/, '肥料'], [/違い/, '使い'], [/と(\d)/, '度$1'],
+  [/高温日/, '高温時'], [/反省/, '反転'], [/家事/, '花芽'],
+  [/木の実/, '肥料'], [/化け物/, '化成肥料'],
+];
+
+export const FOLLOW_UP_QUESTIONS: Record<FollowUpStep, string[]> = {
+  WORK: ['今日はどんな作業した？', 'お疲れ様！今日は何頑張った？', '今日の仕事、教えて！'],
+  HOUSE_TEMP: ['ハウスの温度、わかる範囲で教えて？', '温度はどのくらいだった？', 'ハウス何度くらい？'],
+  FERTILIZER: ['栄養（肥料）はあげた？', '木に御飯（肥料）あげた？', '肥料の話、なんかある？'],
+  PEST: ['虫や病気、気になるとこなかった？', '虫や病気は大丈夫だった？', '変な虫とか出てない？'],
+  HARVEST: ['今日なにか穫れた？', '収穫はあった？', '穫れたもの、あれば教えて！'],
+  COST: ['お金かかったものある？（資材・燃料とか）', '出費はなんかあった？', '買ったものとか、ある？'],
+  DURATION: ['どのくらい頑張った？（時間）', '何時間くらい作業した？', '作業時間、ざっくりでいいよ！'],
+  PHOTO: ['写真、残しとく？', '今の様子、撮っとく？', '記録写真、どう？'],
+};
+
+/* ── Structured extraction: classify input to step ── */
+export const CLASSIFY_RE: Record<FollowUpStep, RegExp> = {
+  WORK: /灌水|剪定|散布|摘果|施肥|観察|収穫|換気|袋かけ|消毒|出荷|作業|草刈|定植/,
+  HOUSE_TEMP: /\d+度|\d+℃|温度|気温|最高|最低/,
+  FERTILIZER: /肥料|追肥|元肥|窒素|リン|カリ|有機|化成|施肥|撒いた|まいた/,
+  PEST: /病|虫|害|薬|殺虫|殺菌|防除|散布|カイガラ|すす|紋羽|灰斑|黒点/,
+  HARVEST: /収穫|穫れた|取れた|出荷|kg|キロ|コンテナ|箱|個|玉/,
+  COST: /円|費|コスト|経費|支出|買った|購入|万|千/,
+  DURATION: /時間|分|午前|午後|朝|昼|夕|始め|終わ/,
+  PHOTO: /撮った|とった|写真|画像/,
+};
+
+/* ── pest_status verb stripping ── */
+export const PEST_VERB_RE = /(が|を|は)?(い(た|ました|ます|る)|あっ(た|て)|出(た|て(い(た|る))?)|発生(し(た|て(い(た|る))?)?)?|見つか(った|って)|確認(し(た|て(い(た|る))?)?)?)$/;
+
+export const WORK_CHIPS = [
+  { p: /水やり|灌水|かんすい|みずやり/, l: '灌水' }, { p: /剪定|せんてい/, l: '剪定' },
+  { p: /薬|散布|消毒/, l: '薬散' }, { p: /摘果|てきか/, l: '摘果' },
+  { p: /施肥|肥料|ひりょう/, l: '施肥' }, { p: /観察|かんさつ|見回/, l: '観察' },
+  { p: /収穫|しゅうかく/, l: '収穫' }, { p: /換気|かんき/, l: '換気' },
+  { p: /袋かけ|袋掛/, l: '袋かけ' }, { p: /害虫|虫|カビ/, l: '病害虫' },
+];
+
+export const REFERENCE_LINKS = [
+  '長崎県農林技術開発センター: https://www.pref.nagasaki.jp/section/nougisen/',
+  '農研機構 果樹研究部門: https://www.naro.go.jp/laboratory/nifts/',
+  'JA長崎せいひ 枇杷栽培情報: https://www.ja-nagasakiseihi.jp/',
+];
+
+/* ── IndexedDB constants ── */
+export const MEDIA_DB = 'agri-buddy-media';
+export const MEDIA_STORE = 'media';
+export const MAX_MEDIA_PER_RECORD = 5;
+
+/* ── Shared text-cleaning patterns ── */
+export const NAV_NOISE_RE = /次へ|つぎへ|スキップ|以上です|いじょうです|以上|終わり|おわり|終了|しゅうりょう|確定|かくてい|OK|オッケー|オーケー|完了|かんりょう|パス/g;
+export const FILLER_RE = /[えあうー]{2,}っ?と|まあ(ね|さ)?|そうですね|なんか|ちょっと(?=、)|えーと|あのー?|まー/g;
+export const LOCATION_GHOST_RE = /茂木町ハウス|Mogi-cho House/;
+
+/* ── Gemini prompt sections ── */
+export const GEMINI_PROMPT_SECTIONS = {
+  SYSTEM_ROLE: `あなたはAgri-Buddy、枇杷ハウス栽培に特化した営農AIパートナーです。
+温かい対話調で応答してください。`,
+
+  LOCATION_RULES: `【locationルール — 最重要】
+- ユーザーが場所を明言していない場合、locationフィールドは空文字列("")にすること。
+- 「茂木町ハウス」等の地名をAIが勝手に補完・捏造することは絶対に禁止。
+- locationはフロントエンドで選択済みの値がpartialに入っている場合のみそれを使う。`,
+
+  VOICE_CORRECTION_RULES: `【音声認識エラー修正ルール — 最優先】
+音声入力は頻繁に誤変換される。以下のパターンを農業文脈で必ず補正せよ:
+- 「お昼」→「肥料」（「お昼をまいた」=「肥料を散布」）
+- 「違い」→「使い」（「農薬の違い方」=「農薬の使い方」）
+- 「と+数字」→「度+数字」（「と28」=「度28」→ 28℃）
+- 「高温日」→「高温時」、「家事」→「花芽」、「木の実」→「肥料」
+- 「化け物」→「化成肥料」、「反省」→「反転」
+- 農業文脈では常に農業用語を優先し、日常語の解釈は避けること`,
+
+  SILENT_COMPLETION_RULES: `【Silent Completion ルール — 最重要】
+**必ず status="complete" を返してください。interview は禁止です。**
+足りない項目はデフォルトで埋め、missing_hints で通知するだけ。`,
+
+  VALIDATION_RULES: `【データ検証ルール — 最重要】
+- 気温: -20℃〜60℃の範囲外は異常値として除外。house_dataに含めないこと。
+- 湿度: 0%〜100%の範囲外は異常値として除外。
+- 実測値がない場合はnullを返す。推測値やダミーデータは絶対に使用しない。
+- house_data は実測値がある場合のみ返す。ない場合はnullとする。`,
+
+  EXTRACTION_RULES: `【抽出ルール】
+不足項目への言及をreplyに含めない。抽出できたものだけ返せ。
+
+【抽出対象項目】
+1. house_max_temp / house_min_temp / house_humidity（実測値のみ、なければnull）
+2. work_log: 作業内容（複数可、数量含む）
+3. plant_status: 作物の状態
+4. fertilizer: 肥料（銘柄・量）
+5. pest_status: 病害虫の有無・種類
+6. harvest_amount: 収穫量
+7. material_cost: 資材・燃料コスト
+8. work_duration: 作業時間
+9. fuel_cost: 燃料費`,
+
+  DIALECT_RULES: `【方言・曖昧入力の正規化 — Agri-Fact変換】
+ユーザーは長崎県茂木町の農家。以下を適用:
+
+1. 方言→標準農業用語:
+   - 「ばさろ暑か」→「非常に高温」、「ちょっとばかし」→「少量」
+   - 「よか」「よかばい」→「良好」、「いっちょん」→「全く～ない」
+   - 九州弁の推量語尾「〜と」「〜ばい」「〜たい」は除去のみ
+
+2. 音声誤変換の文脈補正（重要 — 音声認識は以下を頻繁に誤変換する）:
+   - 「麦茶ハウス」→「ハウス」、「ビバハウス」「ビーバーハウス」→「枇杷ハウス」
+   - 「期日」→「気温」（「期日まで」は除く）、「湿温度」→「湿度」
+   - 「散歩」→「散布」（「散歩しに」等は除く）
+   - 数値+農業文脈で推定: 「20度くらい」→ max_temp: 20
+   - 作業動詞の標準化: 「水をやった」→「灌水」、「薬をかけた」→「薬剤散布」
+   - 曖昧な量「ちょっと」「たくさん」はそのまま記録、数値化しない
+
+3. admin_log生成:
+   - 方言・口語→書き言葉の農業用語に変換。事実のみ。推測・助言は含めない
+   - 文体: 箇条書き・体言止め（例: 「肥料散布。カメムシ確認。最高28℃。」）
+   - 「〜しました」「〜です」等の丁寧語は使わない
+   - 数値は単位付き（℃, %, kg, 円）。不明項目は省略（「-」ではなく）
+
+4. フィラー除去: 「えーと」「あー」「まあ」等は除去
+
+5. ナビゲーション発言の完全除去（最重要）:
+   - 「次へ」「スキップ」「以上」「終わり」「確定」「OK」「完了」「パス」等のUI操作語句は農業データではない
+   - これらが入力に含まれていても、work_log・admin_logには一切反映しないこと
+   - admin_logは農業日誌として意味のある事実（主語・述語・数値）のみで構成すること`,
+
+  ADVICE_RULES: `【Confidence-Based Advice — 先輩農家の口調】
+- 専門用語は使わず、現場のことばで書く。括弧つき解説は不要。
+- 具体的な数値と対策を明記するが、難しい言い回しは避ける。
+- "low"（0-1項目）: 「記録しました。詳細を追加すると、具体的な分析が可能になります。」のみ。推測・季節一般論は禁止。
+- "medium"（2-4項目）: 入力データのみに基づくアドバイス。入力されていないフィールドへの言及は禁止。
+- "high"（5+項目）: データに基づく詳しい分析。温度→暑さ寒さの影響、病害虫→具体的な薬剤名、施肥→効果が出る時期。
+- 「現状維持で問題なし」等の無意味な回答は禁止。必ず次にやることを提示。
+
+【Strategic Advice】
+次回やったほうがいいこと。入力データに基づく行のみ。季節一般論は禁止。
+緊急なら【緊急】をつける。経営に影響するなら「経営注記:」をつける。
+**重複禁止**: adviceとstrategic_adviceで同じ内容を繰り返さない。各行はユニークであること。
+
+【文体ルール】
+- 先輩農家が後輩に教えるような口調で書く。
+- 「〜が推奨されます」→「〜したほうがいい」「〜がいい」
+- 冒頭に今日の作業への称賛を添え、末尾に「次のアクション」一覧を付与すること。
+
+【Probabilistic Advice】
+- 断定を避け「〜の可能性がある」「〜したほうがいい（要確認）」表現を使用
+- 参考: 長崎県農林技術開発センター, 農研機構, JA長崎せいひ`,
+
+  OUTPUT_SCHEMA: `【出力JSON — status は必ず "complete"】
+{
+  "status": "complete",
+  "reply": "記録完了の報告",
+  "missing_hints": ["不足項目"] (optional),
+  "confidence": "low" | "medium" | "high",
+  "house_data": { "max_temp": N|null, "min_temp": N|null, "humidity": N|null } | null,
+  "work_log": "str",
+  "plant_status": "str",
+  "advice": "confidence に応じたアドバイス",
+  "strategic_advice": "次回作業の推奨",
+  "fertilizer": "str" (optional),
+  "pest_status": "str" (optional),
+  "harvest_amount": "str" (optional),
+  "material_cost": "str" (optional),
+  "work_duration": "str" (optional),
+  "fuel_cost": "str" (optional),
+  "admin_log": "営農日誌テキスト"
+}`,
+};
