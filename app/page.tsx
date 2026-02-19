@@ -9,36 +9,39 @@ import {
 import type {
   ConvMessage, HouseData, PartialSlots, ApiResponse,
   Phase, View, OutdoorWeather, LocalRecord, LastSession,
-  FollowUpStep, ConfirmItem,
+  FollowUpStep, ConfirmItem, EmotionAnalysis,
 } from '@/lib/types';
 import {
   APP_NAME, MAX_LISTEN_MS, BREATHING_MS,
   SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED,
   DAY_NAMES,
   GLASS, CARD_FLAT, CARD_ACCENT,
-  SOS_RE,
   FOLLOW_UP_QUESTIONS,
   MAX_MEDIA_PER_RECORD,
   NAV_NOISE_RE,
+  IOS_MAX_VOICE_QUESTIONS,
 } from '@/lib/constants';
 import { isValidTemp } from '@/lib/logic/validation';
 import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
 import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending } from '@/lib/logic/extraction';
 import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
-import { speak, createRecog } from '@/lib/client/speech';
+import { speak, createRecog, invalidateRecogCache, startTTSKeepalive, stopTTSKeepalive, isIOS } from '@/lib/client/speech';
 import {
   loadRecs, saveRecLS, markSync, getUnsynced,
   loadSession, saveSession, sanitizeRecords, deepClean,
   saveMediaBlob, loadMediaForRecord, updateMediaRecordId,
-  getCalDays,
+  getCalDays, saveMoodEntry,
 } from '@/lib/client/storage';
+import { analyzeEmotion } from '@/lib/logic/empathy';
+import { pickNudge } from '@/lib/logic/empathyResponses';
 import { MentorMode } from '@/components/features/MentorMode';
 import { ConfirmScreen } from '@/components/features/ConfirmScreen';
 import { HistoryView } from '@/components/features/HistoryView';
 import { CelebrationOverlay } from '@/components/features/CelebrationOverlay';
 import { FollowUpBar } from '@/components/features/FollowUpBar';
 import { TabBar } from '@/components/features/TabBar';
+import { EmpathyCard } from '@/components/features/EmpathyCard';
 
 /* ═══════════════════════════════════════════
    Main Component
@@ -62,6 +65,9 @@ export default function AgriBuddy() {
   const [lastSess, setLastSess] = useState<LastSession | null>(null);
   const [curLoc, setCurLoc] = useState('');
   const [photoCount, setPhotoCount] = useState(0);
+
+  // HTTPS誘導
+  const [httpsRedirectUrl, setHttpsRedirectUrl] = useState<string | null>(null);
 
   // Calendar
   const [calMonth, setCalMonth] = useState(() => new Date());
@@ -128,10 +134,26 @@ export default function AgriBuddy() {
   const followUpQueueRef = useRef<FollowUpStep[]>([]);
   const isFirstQuestionRef = useRef(false);
   const sosDetectedRef = useRef(false);
+  const tier2DetectedRef = useRef<EmotionAnalysis | null>(null);
+  const normalEmotionRef = useRef<EmotionAnalysis | null>(null);
+  const [empathyCard, setEmpathyCard] = useState<EmotionAnalysis | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingDataRef = useRef<Record<string, any>>({});
   const advanceFollowUpRef = useRef<() => void>(() => {});
+  const emptyRetryRef = useRef(0);
+  const iosVoiceCountRef = useRef(0);
+  const iosTextModeRef = useRef(false);
+  const [iosTextMode, setIosTextMode] = useState(false);
+  const iosTextInputRef = useRef<HTMLInputElement>(null);
 
+  // Persistent SpeechRecognition refs (iOS Safari mic banner suppression)
+  const resultOffsetRef = useRef(0);        // onresultでの読み取り開始位置
+  const mutedRef = useRef(false);           // TTS中にtrue→結果無視+オフセット前進
+  const persistentRecogRef = useRef(false); // follow-up中のpersistentモードフラグ
+
+  const phaseRef = useRef<Phase>('IDLE');
+
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { convRef.current = conv; }, [conv]);
   useEffect(() => { locRef.current = curLoc; }, [curLoc]);
 
@@ -140,7 +162,8 @@ export default function AgriBuddy() {
     if (phase !== 'THINKING' && phase !== 'BREATHING') return;
     const timer = setTimeout(() => {
       console.warn(`Phase watchdog: stuck in ${phase} for 120s, resetting to IDLE`);
-      if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
+      persistentRecogRef.current = false; mutedRef.current = false; resultOffsetRef.current = 0;
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
       followUpActiveRef.current = false;
       setFollowUpInfo(null);
       setPhase('IDLE');
@@ -243,6 +266,10 @@ export default function AgriBuddy() {
     fetchWeather().then(setOutdoor);
     setIsOnline(navigator.onLine);
     setPendSync(getUnsynced().length);
+    // HTTPS誘導: 非localhostかつ非secureの場合、HTTPS URLを案内
+    if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+      setHttpsRedirectUrl(`https://${location.hostname}:3001${location.pathname}`);
+    }
     const prev = loadSession();
     if (prev) {
       prev.location = sanitizeLocation(prev.location);
@@ -268,7 +295,7 @@ export default function AgriBuddy() {
     if (maxRef.current) { clearTimeout(maxRef.current); maxRef.current = null; }
   }, []);
 
-  useEffect(() => () => { try { recogRef.current?.stop(); } catch {} clr(); window.speechSynthesis?.cancel(); }, [clr]);
+  useEffect(() => () => { persistentRecogRef.current = false; try { recogRef.current?.stop(); } catch {} clr(); window.speechSynthesis?.cancel(); }, [clr]);
 
   /* ── Build confirm items ── */
   const buildConfirmItems = useCallback((): ConfirmItem[] => {
@@ -283,19 +310,17 @@ export default function AgriBuddy() {
     items.push({ key: 'location', label: '場所', value: loc || '場所未定' });
 
     if (d.ocr_date) items.push({ key: 'ocr_date', label: '日付', value: d.ocr_date });
-    if (d.work_log) items.push({ key: 'work_log', label: '作業内容', value: d.work_log });
-    if (d.house_data) {
-      const hd = d.house_data as HouseData;
-      if (hd.max_temp !== null) items.push({ key: 'max_temp', label: '最高気温', value: `${hd.max_temp}℃` });
-      if (hd.min_temp !== null) items.push({ key: 'min_temp', label: '最低気温', value: `${hd.min_temp}℃` });
-      if (hd.humidity !== null) items.push({ key: 'humidity', label: '湿度', value: `${hd.humidity}%` });
-    }
-    if (d.fertilizer) items.push({ key: 'fertilizer', label: '肥料', value: d.fertilizer });
-    if (d.pest_status) items.push({ key: 'pest_status', label: '病害虫', value: d.pest_status });
-    if (d.harvest_amount) items.push({ key: 'harvest_amount', label: '収穫', value: d.harvest_amount });
-    if (d.material_cost) items.push({ key: 'material_cost', label: '資材費', value: d.material_cost });
-    if (d.fuel_cost) items.push({ key: 'fuel_cost', label: '燃料費', value: d.fuel_cost });
-    if (d.work_duration) items.push({ key: 'work_duration', label: '作業時間', value: d.work_duration });
+    items.push({ key: 'work_log', label: '作業内容', value: d.work_log || '' });
+    const hd = d.house_data as HouseData | null | undefined;
+    items.push({ key: 'max_temp', label: '最高気温', value: hd?.max_temp != null ? `${hd.max_temp}℃` : '' });
+    items.push({ key: 'min_temp', label: '最低気温', value: hd?.min_temp != null ? `${hd.min_temp}℃` : '' });
+    items.push({ key: 'humidity', label: '湿度', value: hd?.humidity != null ? `${hd.humidity}%` : '' });
+    items.push({ key: 'fertilizer', label: '肥料', value: d.fertilizer || '' });
+    items.push({ key: 'pest_status', label: '病害虫', value: d.pest_status || '' });
+    items.push({ key: 'harvest_amount', label: '収穫', value: d.harvest_amount || '' });
+    items.push({ key: 'material_cost', label: '資材費', value: d.material_cost || '' });
+    items.push({ key: 'fuel_cost', label: '燃料費', value: d.fuel_cost || '' });
+    items.push({ key: 'work_duration', label: '作業時間', value: d.work_duration || '' });
     if (d.plant_status && d.plant_status !== '良好') items.push({ key: 'plant_status', label: '所見', value: d.plant_status });
 
     // 末尾: 日誌テキスト (admin_log)
@@ -309,6 +334,14 @@ export default function AgriBuddy() {
   /* ── Show Confirm Screen ── */
   const showConfirmScreen = useCallback(() => {
     try {
+      persistentRecogRef.current = false;
+      mutedRef.current = false;
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+      chunksRef.current = '';
+      stopTTSKeepalive();
+      iosVoiceCountRef.current = 0;
+      iosTextModeRef.current = false;
+      setIosTextMode(false);
       followUpActiveRef.current = false;
       followUpIndexRef.current = 0;
       followUpQueueRef.current = [];
@@ -350,6 +383,19 @@ export default function AgriBuddy() {
 
   /* ── OCR Handler ── */
   const handleOcr = useCallback(async (file: File) => {
+    // 完全データ初期化（前回の音声セッション残留を防止）
+    persistentRecogRef.current = false; mutedRef.current = false;
+    const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+    clr(); window.speechSynthesis?.cancel();
+    rawTranscriptRef.current = [];
+    chunksRef.current = '';
+    pendingDataRef.current = {};
+    followUpActiveRef.current = false;
+    followUpIndexRef.current = 0;
+    followUpQueueRef.current = [];
+    setFollowUpInfo(null);
+    setConv([]); setTranscript(''); setPartial({});
+
     setOcrLoading(true);
     setPhase('THINKING');
     try {
@@ -364,9 +410,7 @@ export default function AgriBuddy() {
         return;
       }
       const slots = data.slots || {};
-      if (!pendingDataRef.current || Object.keys(pendingDataRef.current).length === 0) {
-        pendingDataRef.current = {};
-      }
+      pendingDataRef.current = {};
       if (slots.work_log) pendingDataRef.current.work_log = slots.work_log;
       if (slots.fertilizer) pendingDataRef.current.fertilizer = slots.fertilizer;
       if (slots.material_cost) pendingDataRef.current.material_cost = slots.material_cost;
@@ -396,11 +440,12 @@ export default function AgriBuddy() {
       setPhase('IDLE');
     }
     setOcrLoading(false);
-  }, [showConfirmScreen]);
+  }, [showConfirmScreen, clr]);
 
   /* ── Save from Confirm Screen ── */
   const saveFromConfirm = useCallback(() => {
-    if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
+    persistentRecogRef.current = false; mutedRef.current = false;
+    const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
     clr();
     window.speechSynthesis?.cancel();
     const d = pendingDataRef.current;
@@ -411,17 +456,26 @@ export default function AgriBuddy() {
         case 'work_log': d.work_log = raw; break;
         case 'max_temp': {
           const n = parseFloat(raw);
-          if (!isNaN(n) && d.house_data) d.house_data.max_temp = n;
+          if (!isNaN(n)) {
+            if (!d.house_data) d.house_data = { max_temp: null, min_temp: null, humidity: null };
+            d.house_data.max_temp = n;
+          }
           break;
         }
         case 'min_temp': {
           const n = parseFloat(raw);
-          if (!isNaN(n) && d.house_data) d.house_data.min_temp = n;
+          if (!isNaN(n)) {
+            if (!d.house_data) d.house_data = { max_temp: null, min_temp: null, humidity: null };
+            d.house_data.min_temp = n;
+          }
           break;
         }
         case 'humidity': {
           const n = parseFloat(raw);
-          if (!isNaN(n) && d.house_data) d.house_data.humidity = n;
+          if (!isNaN(n)) {
+            if (!d.house_data) d.house_data = { max_temp: null, min_temp: null, humidity: null };
+            d.house_data.humidity = n;
+          }
           break;
         }
         case 'fertilizer': d.fertilizer = raw; break;
@@ -507,6 +561,21 @@ export default function AgriBuddy() {
       return;
     }
 
+    // ── Tier 2: EmpathyCard (post-save, suppress celebration) ──
+    if (tier2DetectedRef.current && tier2DetectedRef.current.tier >= 2) {
+      const empEmotion = tier2DetectedRef.current;
+      tier2DetectedRef.current = null;
+      saveMoodEntry(empEmotion, outdoor);
+      setEmpathyCard(empEmotion);
+      setShowCelebration(false);
+      setProfitPreview(null);
+      const msg = 'きょうもおつかれさま。';
+      setAiReply(msg); setPhase('IDLE'); setView('history');
+      speak(msg);
+      if (navigator.onLine) setTimeout(syncRecs, 500);
+      return;
+    }
+
     setCelebrationProfit(profit.total);
     setShowCelebration(true);
     setTimeout(() => setShowCelebration(false), 5000);
@@ -517,11 +586,13 @@ export default function AgriBuddy() {
       setProfitPreview({ total: profit.total, details: profit.details, message: profitMsg, praise: profit.praise, marketTip: profit.marketTip });
       const fullMsg = `${profit.praise} ${profitMsg}。`;
       setAiReply(fullMsg); setPhase('IDLE');
+      setView('history');
       speak(fullMsg);
     } else {
       setProfitPreview(null);
       const msg = 'きょうもおつかれさま！記録を保存しました。';
       setAiReply(msg); setPhase('IDLE');
+      setView('history');
       speak(msg);
     }
     if (navigator.onLine) setTimeout(syncRecs, 500);
@@ -535,22 +606,76 @@ export default function AgriBuddy() {
 
   /* ── Start Listening ── */
   const startListen = useCallback(() => {
+    // iOS text mode: SR生成を完全に遮断（WebKit SR生成数制限によるクラッシュ防止）
+    if (isIOS && iosTextModeRef.current) return;
+
+    // Persistent mode fast path: recogインスタンス再利用（iOS Safariバナー回避）
+    if (persistentRecogRef.current && recogRef.current) {
+      mutedRef.current = false;
+      chunksRef.current = '';
+      setPhase('LISTENING');
+      setTranscript('');
+      clr();
+      maxRef.current = setTimeout(() => { sasRef.current(); }, MAX_LISTEN_MS);
+      return;
+    }
+
     if (recogRef.current) return; // 二重起動防止
     try {
-      const r = createRecog(); if (!r) return;
+      const r = createRecog();
+      if (!r) {
+        setTranscript('音声認識を利用できません（HTTPS接続が必要です）');
+        return;
+      }
       chunksRef.current = ''; let spoke = false;
       photoTriggeredRef.current = false;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       r.onresult = (e: any) => {
-        let t = ''; for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
+        // ミュート中: オフセットを進めて結果を無視（TTS中のエコー防止）
+        if (mutedRef.current) {
+          resultOffsetRef.current = e.results.length;
+          return;
+        }
+        let t = '';
+        for (let i = resultOffsetRef.current; i < e.results.length; i++) t += e.results[i][0].transcript;
         t = correctAgriTerms(t);
         chunksRef.current = t; setTranscript(t); spoke = true;
-        // 音声コマンドによる状態遷移なし — ナビゲーションはボタンのみ
       };
-      r.onerror = () => {};
+      r.onerror = (e: any) => {
+        if (e.error === 'not-allowed') {
+          setTranscript('マイクの使用を許可してください');
+        }
+      };
       r.onend = () => {
         if (!recogRef.current) return;
         clr();
+
+        // Persistent mode: iOSがrecogを殺した場合、サイレント再起動（バナー1回追加、既存の8回より大幅改善）
+        if (persistentRecogRef.current) {
+          recogRef.current = null;
+          setTimeout(() => {
+            if (!persistentRecogRef.current || recogRef.current) return;
+            try {
+              const r2 = createRecog(); if (!r2) return;
+              resultOffsetRef.current = 0;
+              r2.onresult = r.onresult;
+              r2.onerror = (e: any) => {
+                if (e.error === 'not-allowed') {
+                  setTranscript('マイクの使用を許可してください');
+                }
+              };
+              r2.onend = r.onend;
+              r2.start();
+              recogRef.current = r2;
+            } catch {
+              recogRef.current = null;
+              persistentRecogRef.current = false;
+              setTranscript('マイクの再起動に失敗しました');
+            }
+          }, 300);
+          return;
+        }
+
         recogRef.current = null;
         if (spoke && followUpActiveRef.current) {
           sasRef.current();
@@ -559,13 +684,59 @@ export default function AgriBuddy() {
         if (spoke) {
           setPhase('REVIEWING');
         } else {
-          if (followUpActiveRef.current) setPhase('FOLLOW_UP');
-          else setPhase('IDLE');
+          if (followUpActiveRef.current) {
+            setPhase('FOLLOW_UP');
+            setTimeout(() => {
+              if (followUpActiveRef.current && !recogRef.current) startListen();
+            }, 500);
+          }
+          else if (phaseRef.current !== 'CONFIRM' && phaseRef.current !== 'MENTOR') setPhase('IDLE');
         }
       };
-      r.start(); recogRef.current = r; setPhase('LISTENING'); setTranscript('');
-      maxRef.current = setTimeout(() => { try { r.stop(); } catch {} }, MAX_LISTEN_MS);
-    } catch {}
+      resultOffsetRef.current = 0;
+      // iOS: キャッシュ済みインスタンスの.start()失敗時はキャッシュ破棄→新規生成
+      let active = r;
+      try {
+        r.start();
+      } catch {
+        if (isIOS) {
+          invalidateRecogCache();
+          const fresh = createRecog();
+          if (!fresh) throw new Error('SR unavailable');
+          fresh.onresult = r.onresult;
+          fresh.onerror = r.onerror;
+          fresh.onend = r.onend;
+          try {
+            fresh.start();
+          } catch {
+            throw new Error('SR retry failed');
+          }
+          active = fresh;
+        } else {
+          throw new Error('SR start failed');
+        }
+      }
+      recogRef.current = active; setPhase('LISTENING'); setTranscript('');
+      maxRef.current = setTimeout(() => {
+        if (persistentRecogRef.current) {
+          sasRef.current(); // recog停止せずに処理
+        } else {
+          try { recogRef.current?.stop(); } catch {}
+        }
+      }, MAX_LISTEN_MS);
+    } catch {
+      recogRef.current = null;
+      if (isIOS && followUpActiveRef.current) {
+        invalidateRecogCache();
+        iosTextModeRef.current = true;
+        setIosTextMode(true);
+        setPhase('FOLLOW_UP');
+        setTimeout(() => iosTextInputRef.current?.focus(), 100);
+      } else {
+        setTranscript('マイクの起動に失敗しました');
+        setPhase('IDLE');
+      }
+    }
   }, [clr]);
 
   /* ── Confirm transcript (REVIEWING → process) ── */
@@ -603,10 +774,46 @@ export default function AgriBuddy() {
     }
 
     if (followUpIndexRef.current >= queue.length) {
-      showConfirmScreen();
+      // 全問完了: persistent recog停止
+      persistentRecogRef.current = false;
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+      setFollowUpInfo({ label: '完了', current: queue.length, total: queue.length });
+      setPhase('FOLLOW_UP');
+      let transitioned = false;
+      const doTransition = () => {
+        if (transitioned) return;
+        transitioned = true;
+        showConfirmScreen();
+      };
+      speak('完了！').then(() => setTimeout(doTransition, 500));
+      setTimeout(doTransition, 3000); // safety fallback
       return;
     }
     const step = queue[followUpIndexRef.current];
+
+    // iOS voice cycle budget: ~5回のSpeech API cycleでWebKitがクラッシュするため3問で打ち切り→テキスト入力へ
+    if (isIOS && step !== 'PHOTO') {
+      iosVoiceCountRef.current++;
+      if (iosVoiceCountRef.current > IOS_MAX_VOICE_QUESTIONS) {
+        if (!iosTextModeRef.current) {
+          iosTextModeRef.current = true;
+          setIosTextMode(true);
+          persistentRecogRef.current = false;
+          const _r = recogRef.current; recogRef.current = null;
+          if (_r) try { _r.stop(); } catch {}
+        }
+        // returnしない: テキスト入力モードで質問を継続
+      }
+    }
+
+    emptyRetryRef.current = 0; // 新しい質問ごとにリトライカウンタをリセット
+
+    // PHOTO step: persistent recog停止（音声入力不要）
+    if (step === 'PHOTO') {
+      persistentRecogRef.current = false;
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+    }
+
     const questions = FOLLOW_UP_QUESTIONS[step];
     const question = questions[Math.floor(Math.random() * questions.length)];
     setFollowUpInfo({ label: questions[0], current: followUpIndexRef.current + 1, total: queue.length });
@@ -617,41 +824,92 @@ export default function AgriBuddy() {
     if (isFirstQuestionRef.current) {
       isFirstQuestionRef.current = false;
       setPhase('FOLLOW_UP');
-      // Zero-Tap: TTS開始と同時にマイク即起動 + TTS完了後フォールバック
-      const ttsP = speak(question);
       if (step !== 'PHOTO') {
-        setTimeout(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); }, 100);
-        ttsP.then(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); });
+        // 非iOS: persistent muted recog並行起動（バナー抑制）
+        // iOS: TTS完了までrecog起動しない（audio session排他）
+        if (!isIOS) {
+          persistentRecogRef.current = true;
+          mutedRef.current = true;
+        }
       }
-    } else {
+      // 挨拶 + 最初の質問を1発話で（iOSジェスチャーコンテキスト内で発話 = audio unlock）
+      const ttsP = speak('記録をはじめます。' + question);
+      if (step !== 'PHOTO') {
+        if (!isIOS) setTimeout(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); }, 100);
+        ttsP.then(() => {
+          if (!followUpActiveRef.current) return;
+          mutedRef.current = false;  // TTS完了→明示的unmute（recog死亡時の保険）
+          startListen();
+        });
+      }
+    } else if (iosTextModeRef.current) {
+      // テキスト入力モード: TTS/SR不要、質問テキスト表示のみ
       const breathMs = BREATHING_MS;
       setPhase('BREATHING');
       setTimeout(() => {
         setTranscript('');
         chunksRef.current = '';
         setPhase('FOLLOW_UP');
-        // Zero-Tap: TTS開始と同時にマイク即起動 + TTS完了後フォールバック
+        // speak()もstartListen()も呼ばない
+        setTimeout(() => iosTextInputRef.current?.focus(), 100);
+      }, breathMs);
+    } else {
+      const breathMs = BREATHING_MS;
+      setPhase('BREATHING');
+      mutedRef.current = true; // BREATHING+TTS中はミュート（persistent recog用。iOSではrecog無いので無影響）
+      setTimeout(() => {
+        setTranscript('');
+        chunksRef.current = '';
+        setPhase('FOLLOW_UP');
         const ttsP = speak(question);
         if (step !== 'PHOTO') {
-          setTimeout(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); }, 100);
-          ttsP.then(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); });
+          ttsP.then(() => {
+            if (!followUpActiveRef.current) return;
+            mutedRef.current = false;
+            startListen();
+          });
         }
       }, breathMs);
     }
-  }, [showConfirmScreen, startListen]);
+  }, [startListen, showConfirmScreen]);
 
   useEffect(() => { advanceFollowUpRef.current = advanceFollowUp; }, [advanceFollowUp]);
 
+  /* ── iOS text mode submit ── */
+  const submitIosText = useCallback(() => {
+    const val = iosTextInputRef.current?.value?.trim();
+    if (!val) return;
+    chunksRef.current = correctAgriTerms(val);
+    if (iosTextInputRef.current) iosTextInputRef.current.value = '';
+    sasRef.current();
+  }, []);
+
   /* ── Stop & Send ── */
   const stopAndSend = useCallback(async () => {
-    if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
-    clr();
+    // CONFIRM/MENTOR中はIDLE遷移を完全ブロック（iOS Safari自発onend対策）
+    if (phaseRef.current === 'CONFIRM' || phaseRef.current === 'MENTOR') return;
+    // CONFIRM画面表示済みなら何もしない（iOS同期onendからのstale再呼出防止）
+    if (!followUpActiveRef.current && !recogRef.current && chunksRef.current.trim() === '') return;
+
+    if (persistentRecogRef.current && followUpActiveRef.current && recogRef.current) {
+      mutedRef.current = true;  // 次の質問のTTSまで結果を無視
+      clr();
+    } else {
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+      clr();
+    }
     const text = chunksRef.current.trim();
 
     // ── Follow-up mode ──
     if (followUpActiveRef.current) {
-      if (SOS_RE.test(text)) {
+      const emotion = analyzeEmotion(text);
+      if (emotion.tier >= 3) {
         sosDetectedRef.current = true;
+      } else if (emotion.tier >= 2) {
+        tier2DetectedRef.current = emotion;
+      } else if (emotion.tier === 1 && emotion.primaryCategory) {
+        const nudge = pickNudge(emotion.primaryCategory);
+        if (nudge) speak(nudge);
       }
 
       // Accumulate raw transcript (original)
@@ -666,9 +924,13 @@ export default function AgriBuddy() {
       const isSkip = !cleaned;
 
       if (!isSkip && cleaned.length > 0 && cleaned.length <= 2 && (step === 'FERTILIZER' || step === 'PEST')) {
-        speak('もう一度お願いします');
+        if (!iosTextModeRef.current) speak('もう一度お願いします');
         setTranscript('');
-        setTimeout(() => startListen(), 500);
+        if (iosTextModeRef.current) {
+          setTimeout(() => iosTextInputRef.current?.focus(), 100);
+        } else {
+          setTimeout(() => { if (!followUpActiveRef.current) return; startListen(); }, 500);
+        }
         return;
       }
 
@@ -712,9 +974,25 @@ export default function AgriBuddy() {
         }
       }
 
-      setTranscript('');
-      followUpIndexRef.current++;
-      advanceFollowUpRef.current();
+      if (!isSkip) {
+        // 有効な入力があればリトライカウンタをリセット
+        emptyRetryRef.current = 0;
+        setTranscript('');
+        followUpIndexRef.current++;
+        advanceFollowUpRef.current();
+      } else {
+        // 空テキスト(ノイズ/無音): 同じ質問で再リスン、3回連続でスキップ
+        emptyRetryRef.current++;
+        if (emptyRetryRef.current >= 3) {
+          emptyRetryRef.current = 0;
+          setTranscript('');
+          followUpIndexRef.current++;
+          advanceFollowUpRef.current();
+        } else {
+          setTranscript('');
+          setTimeout(() => { if (!followUpActiveRef.current) return; mutedRef.current = false; startListen(); }, 300);
+        }
+      }
       return;
     }
 
@@ -726,8 +1004,9 @@ export default function AgriBuddy() {
     const textClean = text.replace(NAV_NOISE_RE, '').replace(/\s{2,}/g, ' ').trim();
     if (!textClean) { setPhase('IDLE'); return; }
 
-    // ── SOS Detection ──
-    if (SOS_RE.test(text)) {
+    // ── Emotion Detection ──
+    const emotion = analyzeEmotion(text);
+    if (emotion.tier >= 3) {
       setPhase('MENTOR');
       setMentorCopied(false);
       setMentorStep('comfort');
@@ -747,6 +1026,8 @@ export default function AgriBuddy() {
       setMentorStep('ask');
       return;
     }
+    if (emotion.tier >= 2) tier2DetectedRef.current = emotion;
+    normalEmotionRef.current = emotion;
 
     const locOvr = detectLocationOverride(text, locRef.current);
     if (locOvr) setCurLoc(locOvr);
@@ -784,6 +1065,13 @@ export default function AgriBuddy() {
 
       await speak(d.reply);
 
+      // Tier 1 nudge after AI reply
+      if (normalEmotionRef.current?.tier === 1 && normalEmotionRef.current.primaryCategory) {
+        const nudge = pickNudge(normalEmotionRef.current.primaryCategory);
+        if (nudge) await speak(nudge);
+        normalEmotionRef.current = null;
+      }
+
       try {
         const queue: FollowUpStep[] = [];
         if (!d.house_data) queue.push('HOUSE_TEMP');
@@ -800,6 +1088,7 @@ export default function AgriBuddy() {
           followUpActiveRef.current = true;
           followUpIndexRef.current = 0;
           followUpQueueRef.current = queue;
+          iosVoiceCountRef.current = 0;
           advanceFollowUpRef.current();
         } else {
           showConfirmScreen();
@@ -813,21 +1102,32 @@ export default function AgriBuddy() {
       setAiReply('オフラインです。ローカル保存しました。'); setPhase('IDLE');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [partial, clr, syncRecs, photoCount, showConfirmScreen]);
+  }, [partial, clr, syncRecs, photoCount, showConfirmScreen, startListen]);
 
   useEffect(() => { sasRef.current = stopAndSend; }, [stopAndSend]);
 
   /* ── Confirm Follow-Up Step (次へ) ── */
   const confirmFollowUpStep = useCallback(() => {
-    if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
-    clr();
+    if (persistentRecogRef.current && recogRef.current) {
+      mutedRef.current = true;
+      clr();
+    } else {
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+      clr();
+    }
     sasRef.current();
   }, [clr]);
 
   /* ── Skip Follow-Up ── */
   const skipFollowUp = useCallback(() => {
-    if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
-    clr(); window.speechSynthesis?.cancel();
+    if (persistentRecogRef.current && recogRef.current) {
+      mutedRef.current = true;
+      clr();
+    } else {
+      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+      clr();
+    }
+    window.speechSynthesis?.cancel();
     photoWaitingRef.current = false;
     setTranscript('');
     followUpIndexRef.current++;
@@ -836,37 +1136,85 @@ export default function AgriBuddy() {
 
   /* ── Skip ALL ── */
   const skipAllFollowUp = useCallback(() => {
-    if (recogRef.current) { try { recogRef.current.stop(); } catch {} recogRef.current = null; }
+    persistentRecogRef.current = false;
+    const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
     clr(); window.speechSynthesis?.cancel();
     setTranscript('');
-    followUpIndexRef.current = followUpQueueRef.current.length;
-    advanceFollowUpRef.current();
-  }, [clr]);
+    // advanceFollowUp経由せず直接CONFIRM画面へ
+    showConfirmScreen();
+  }, [clr, showConfirmScreen]);
 
   /* ── Start Interview (question-first flow) ── */
   const startInterview = useCallback(() => {
+    // 前回セッションの完全クリーンアップ
+    // 挨拶はadvanceFollowUpの最初の質問に統合（speak→cancel→speakのChrome bugを回避）
+    persistentRecogRef.current = false; mutedRef.current = false; resultOffsetRef.current = 0;
+    const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+    clr();
+
+    // Ref状態リセット
+    rawTranscriptRef.current = [];
+    chunksRef.current = '';
+    sosDetectedRef.current = false;
+    tier2DetectedRef.current = null;
+    normalEmotionRef.current = null;
+    photoWaitingRef.current = false;
+    emptyRetryRef.current = 0;
+    iosVoiceCountRef.current = 0;
+    iosTextModeRef.current = false;
     pendingDataRef.current = {};
+
+    // React状態リセット
     setTranscript(''); setAiReply(''); setPartial({}); setConv([]); setProfitPreview(null);
+    setPhotoCount(0); setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
+    setBump(null); setConfidence(null); setConfirmItems([]); setFollowUpInfo(null);
+    setIosTextMode(false);
+
+    // Mentor状態リセット
+    setMentorDraft(''); setMentorCopied(false); setMentorStep('comfort'); setConsultSheet('');
+
+    // メディアプレビューのURL revoke
+    mediaPreview.forEach(m => URL.revokeObjectURL(m.url));
+    setMediaPreview([]);
+
+    // 前回セッション破棄
+    localStorage.removeItem(SK_SESSION);
+
     const queue: FollowUpStep[] = ['WORK','HOUSE_TEMP','FERTILIZER','PEST','HARVEST','COST','DURATION','PHOTO'];
     followUpActiveRef.current = true;
     followUpIndexRef.current = 0;
     followUpQueueRef.current = queue;
     isFirstQuestionRef.current = true;
+    startTTSKeepalive();
     advanceFollowUpRef.current();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clr]);
 
   /* ── Begin Session ── */
   const begin = useCallback(() => {
+    // マイク権限プリリクエスト（ユーザージェスチャーコンテキスト内で発火）
+    // → ブラウザが許可プロンプトを表示。fire-and-forget で interview 開始をブロックしない
+    navigator.mediaDevices?.getUserMedia({ audio: true })
+      .then(s => s.getTracks().forEach(t => t.stop()))
+      .catch(() => {});
     startInterview();
   }, [startInterview]);
 
   const reset = () => {
-    try { recogRef.current?.stop(); } catch {} clr(); window.speechSynthesis?.cancel();
+    persistentRecogRef.current = false; mutedRef.current = false; resultOffsetRef.current = 0;
+    try { recogRef.current?.stop(); } catch {} recogRef.current = null; clr(); window.speechSynthesis?.cancel();
+    stopTTSKeepalive();
+    iosVoiceCountRef.current = 0;
+    iosTextModeRef.current = false;
+    setIosTextMode(false);
     followUpActiveRef.current = false;
     followUpIndexRef.current = 0;
     followUpQueueRef.current = [];
     photoWaitingRef.current = false;
     sosDetectedRef.current = false;
+    tier2DetectedRef.current = null;
+    normalEmotionRef.current = null;
+    setEmpathyCard(null);
     rawTranscriptRef.current = [];
     setFollowUpInfo(null);
     setConfirmItems([]);
@@ -887,11 +1235,28 @@ export default function AgriBuddy() {
   const onPtrUp = useCallback(() => {
     if (phase === 'THINKING' || phase === 'CONFIRM' || phase === 'BREATHING' || phase === 'MENTOR' || phase === 'REVIEWING') return;
     if (Date.now() - ptrRef.current < 200) {
-      if (phase === 'LISTENING') { try { recogRef.current?.stop(); } catch {} }
+      if (phase === 'LISTENING') {
+        if (persistentRecogRef.current && followUpActiveRef.current) {
+          mutedRef.current = true;
+          sasRef.current(); // recog停止せずに処理
+        } else {
+          try { recogRef.current?.stop(); } catch {}
+        }
+      }
       else if (phase === 'FOLLOW_UP') startListen();
       else if (conv.length === 0 && !todayHouse && !followUpActiveRef.current) begin();
       else { if (bump) setBump(null); startListen(); }
-    } else { lpRef.current = true; if (phase === 'LISTENING') { try { recogRef.current?.stop(); } catch {} } }
+    } else {
+      lpRef.current = true;
+      if (phase === 'LISTENING') {
+        if (persistentRecogRef.current && followUpActiveRef.current) {
+          mutedRef.current = true;
+          sasRef.current();
+        } else {
+          try { recogRef.current?.stop(); } catch {}
+        }
+      }
+    }
   }, [phase, startListen, begin, conv.length, todayHouse, bump]);
 
   const dateStr = mounted ? (() => {
@@ -997,6 +1362,16 @@ export default function AgriBuddy() {
           {/* ═══ IDLE CONTENT ═══ */}
           {phase === 'IDLE' && (
             <>
+              {httpsRedirectUrl && (
+                <section className="mx-5 mb-4 fade-up">
+                  <a href={httpsRedirectUrl}
+                    className="block p-5 rounded-2xl bg-amber-50/90 backdrop-blur-xl border border-amber-300/50 shadow-lg">
+                    <p className="text-lg font-bold text-amber-800 mb-1">音声機能にはHTTPS接続が必要です</p>
+                    <p className="text-base font-medium text-amber-600 underline">{httpsRedirectUrl}</p>
+                  </a>
+                </section>
+              )}
+
               {isFirstTime && !aiReply && (
                 <section className="mx-5 mb-4 view-enter">
                   <div className={`p-6 rounded-2xl ${CARD_ACCENT}`}>
@@ -1173,8 +1548,29 @@ export default function AgriBuddy() {
                 </div>
               )}
 
+              {/* ═══ iOS TEXT INPUT (voice limit reached) ═══ */}
+              {iosTextMode && phase === 'FOLLOW_UP' && followUpInfo && (
+                <form onSubmit={(e) => { e.preventDefault(); submitIosText(); }} className="w-full max-w-md mx-auto mb-4">
+                  <div className="flex gap-2">
+                    <input
+                      ref={iosTextInputRef}
+                      type="text"
+                      placeholder="テキストで入力..."
+                      className={`flex-1 px-4 py-3.5 rounded-xl text-lg font-medium ${GLASS}`}
+                      enterKeyHint="send"
+                    />
+                    <button type="submit"
+                      className="px-6 py-3.5 rounded-xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white font-bold text-lg shadow-lg btn-press">
+                      送信
+                    </button>
+                  </div>
+                </form>
+              )}
+
               {/* ═══ MIC / CAMERA BUTTON (Record View) ═══ */}
               {(() => {
+                // iOS text mode中はマイクボタン非表示
+                if (iosTextMode && phase === 'FOLLOW_UP') return null;
                 const isPhotoStep = followUpInfo !== null
                   && followUpQueueRef.current[followUpIndexRef.current] === 'PHOTO'
                   && (phase === 'FOLLOW_UP' || phase === 'LISTENING');
@@ -1214,7 +1610,9 @@ export default function AgriBuddy() {
                         `}
                         aria-label="タップして話す"
                       >
-                        <Mic className="w-16 h-16 text-white" />
+                        <Mic className={`w-16 h-16 text-white ${
+                          phase === 'LISTENING' ? 'animate-pulse' : phase === 'THINKING' ? 'animate-bounce' : ''
+                        }`} />
                       </button>
                     </div>
                     <p className="mt-4 text-xl font-bold text-white/70">
@@ -1255,7 +1653,11 @@ export default function AgriBuddy() {
                     if (photoWaitingRef.current || isPhotoStep) {
                       photoWaitingRef.current = false;
                       followUpIndexRef.current++;
-                      setTimeout(() => advanceFollowUpRef.current(), 1000);
+                      // 音声認識を確実に停止してからCONFIRM遷移（遅延onendによるIDLEリセット防止）
+                      persistentRecogRef.current = false;
+                      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
+                      window.speechSynthesis?.cancel();
+                      setTimeout(() => showConfirmScreen(), 500);
                     }
                   }} />
                 <input ref={ocrInputRef} type="file" accept="image/*" className="hidden"
@@ -1272,7 +1674,7 @@ export default function AgriBuddy() {
                     タップすると質問が始まります<br/>
                     <span className="text-white/30">声で答えて、ボタンで操作</span>
                   </p>
-                  {!aiReply && !isFirstTime && (
+                  {!isFirstTime && (
                     <button onClick={() => ocrInputRef.current?.click()}
                       className={`mt-4 py-3 px-6 rounded-2xl ${CARD_FLAT} flex items-center justify-center gap-2 text-lg font-bold text-stone-700 hover:bg-white/80 btn-press`}>
                       <FileScan className="w-5 h-5" /> 過去の日誌をスキャン
@@ -1309,6 +1711,11 @@ export default function AgriBuddy() {
       {/* ═══ CELEBRATION OVERLAY ═══ */}
       {showCelebration && (
         <CelebrationOverlay celebrationProfit={celebrationProfit} />
+      )}
+
+      {/* ═══ EMPATHY CARD (Tier 2) ═══ */}
+      {empathyCard && (
+        <EmpathyCard emotion={empathyCard} outdoor={outdoor} onDismiss={() => setEmpathyCard(null)} />
       )}
 
       {/* ═══ FULLSCREEN MEDIA VIEWER ═══ */}
