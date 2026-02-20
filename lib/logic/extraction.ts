@@ -1,5 +1,5 @@
 import { AGRI_CORRECTIONS, WORK_CHIPS, NAV_NOISE_RE, FILLER_RE, LOCATION_GHOST_RE } from '@/lib/constants';
-import type { PartialSlots } from '@/lib/types';
+import type { PartialSlots, ConfirmItem } from '@/lib/types';
 import { isNegativeInput } from '@/lib/logic/advice';
 
 export function correctAgriTerms(text: string): string {
@@ -108,6 +108,27 @@ export function buildSlotsFromPending(d: Record<string, any>): PartialSlots {
     if (d.house_data.min_temp !== null) slots.min_temp = d.house_data.min_temp;
     if (d.house_data.humidity !== null) slots.humidity = d.house_data.humidity;
   }
+  return slots;
+}
+
+export function buildSlotsFromConfirmItems(items: ConfirmItem[]): PartialSlots {
+  const get = (key: string) => items.find(it => it.key === key)?.value || '';
+  const slots: PartialSlots = {
+    work_log: get('work_log') || undefined,
+    plant_status: get('plant_status') || undefined,
+    fertilizer: get('fertilizer') || undefined,
+    pest_status: get('pest_status') || undefined,
+    harvest_amount: get('harvest_amount') || undefined,
+    material_cost: get('material_cost') || undefined,
+    work_duration: get('work_duration') || undefined,
+    fuel_cost: get('fuel_cost') || undefined,
+  };
+  const maxN = parseFloat(get('max_temp'));
+  const minN = parseFloat(get('min_temp'));
+  const humN = parseFloat(get('humidity'));
+  if (!isNaN(maxN)) slots.max_temp = maxN;
+  if (!isNaN(minN)) slots.min_temp = minN;
+  if (!isNaN(humN)) slots.humidity = humN;
   return slots;
 }
 

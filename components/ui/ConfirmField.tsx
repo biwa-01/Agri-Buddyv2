@@ -6,12 +6,21 @@ import type { ConfirmItem } from '@/lib/types';
 
 const MULTILINE_KEYS = new Set(['admin_log', 'raw_transcript']);
 
-export function ConfirmField({ item, onUpdate }: { item: ConfirmItem; onUpdate: (key: string, val: string) => void }) {
+export function ConfirmField({ item, onUpdate, onReExtract }: {
+  item: ConfirmItem;
+  onUpdate: (key: string, val: string) => void;
+  onReExtract?: (text: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.value);
   const inputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isMultiline = MULTILINE_KEYS.has(item.key);
+
+  // 外部からのvalue変更時にdraftを同期（re-extraction後のUI反映）
+  useEffect(() => {
+    if (!editing) setDraft(item.value);
+  }, [item.value, editing]);
 
   useEffect(() => {
     if (editing) {
@@ -30,7 +39,13 @@ export function ConfirmField({ item, onUpdate }: { item: ConfirmItem; onUpdate: 
               className="w-full text-lg font-bold text-stone-900 bg-transparent border-2 border-amber-400 outline-none py-1 px-2 rounded-lg resize-y" />
           ) : (
             <input ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { onUpdate(item.key, draft); setEditing(false); } }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  onUpdate(item.key, draft);
+                  if (item.key === 'raw_transcript' && draft !== item.value && onReExtract) onReExtract(draft);
+                  setEditing(false);
+                }
+              }}
               className="w-full text-xl font-bold text-stone-900 bg-transparent border-b-2 border-amber-400 outline-none py-1" />
           )
         ) : (
@@ -44,7 +59,11 @@ export function ConfirmField({ item, onUpdate }: { item: ConfirmItem; onUpdate: 
       <div className={`${isMultiline ? 'flex justify-end' : ''} shrink-0`}>
         {editing ? (
           <div className="flex gap-1">
-            <button onClick={() => { onUpdate(item.key, draft); setEditing(false); }}
+            <button onClick={() => {
+                onUpdate(item.key, draft);
+                if (item.key === 'raw_transcript' && draft !== item.value && onReExtract) onReExtract(draft);
+                setEditing(false);
+              }}
               className="p-2 rounded-full bg-green-100 text-green-700 hover:bg-green-200 btn-press"><Check className="w-5 h-5" /></button>
             <button onClick={() => { setDraft(item.value); setEditing(false); }}
               className="p-2 rounded-full bg-stone-100 text-stone-500 hover:bg-stone-200 btn-press"><X className="w-5 h-5" /></button>

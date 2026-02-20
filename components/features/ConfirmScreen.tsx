@@ -11,9 +11,11 @@ interface ConfirmScreenProps {
   onUpdate: (key: string, val: string) => void;
   onSave: () => void;
   onReset: () => void;
+  onReExtract?: (text: string) => void;
+  reExtracting?: boolean;
 }
 
-export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset }: ConfirmScreenProps) {
+export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onReExtract, reExtracting }: ConfirmScreenProps) {
   // Split items into sections
   const rawItem = confirmItems.find(it => it.key === 'raw_transcript');
   const adminItem = confirmItems.find(it => it.key === 'admin_log');
@@ -45,8 +47,11 @@ export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset }: Confi
                 <Mic className="w-3.5 h-3.5" />あなたの音声
               </p>
               <div className="font-sans font-bold">
-                <ConfirmField item={rawItem} onUpdate={onUpdate} />
+                <ConfirmField item={rawItem} onUpdate={onUpdate} onReExtract={onReExtract} />
               </div>
+              {reExtracting && (
+                <p className="text-sm font-bold text-amber-600 mt-1 animate-pulse">再解析中...</p>
+              )}
             </div>
           )}
 

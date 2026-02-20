@@ -12,7 +12,15 @@
       "Bash(npm run dev:*)",
       "Bash(lsof:*)",
       "Bash(kill:*)",
-      "WebFetch(domain:localhost)"
+      "WebFetch(domain:localhost)",
+      "Bash(brew install poppler)",
+      "Bash(pdftoppm:*)",
+      "Bash(pdftotext:*)",
+      "Bash(pdfinfo:*)",
+      "Bash(pip3 install:*)",
+      "Bash(python3:*)",
+      "Bash(qlmanage:*)",
+      "Bash(ls:*)"
     ]
   }
 }

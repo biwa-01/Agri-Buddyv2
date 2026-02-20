@@ -22,7 +22,7 @@ import {
 } from '@/lib/constants';
 import { isValidTemp } from '@/lib/logic/validation';
 import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
-import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending } from '@/lib/logic/extraction';
+import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, buildSlotsFromConfirmItems } from '@/lib/logic/extraction';
 import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
 import { speak, createRecog, invalidateRecogCache, isIOS } from '@/lib/client/speech';
@@ -84,6 +84,9 @@ export default function AgriBuddy() {
 
   // Confirm screen state
   const [confirmItems, setConfirmItems] = useState<ConfirmItem[]>([]);
+
+  // Re-extraction loading
+  const [reExtracting, setReExtracting] = useState(false);
 
   // Mentor mode
   const [mentorDraft, setMentorDraft] = useState('');
@@ -578,8 +581,41 @@ export default function AgriBuddy() {
 
   /* ── Update confirm item ── */
   const updateConfirmItem = useCallback((key: string, val: string) => {
-    setConfirmItems(prev => prev.map(it => it.key === key ? { ...it, value: val } : it));
+    setConfirmItems(prev => {
+      const updated = prev.map(it => it.key === key ? { ...it, value: val } : it);
+      // admin_log直接編集 or raw_transcript編集: そのまま更新（別処理）
+      if (key === 'admin_log' || key === 'raw_transcript') return updated;
+      // スロットまたはlocation編集時: admin_logを再生成
+      const loc = updated.find(it => it.key === 'location')?.value || '';
+      const slots = buildSlotsFromConfirmItems(updated);
+      const newLog = generateAdminLog(slots, loc === '場所未定' ? '' : loc);
+      return updated.map(it => it.key === 'admin_log' ? { ...it, value: newLog } : it);
+    });
   }, []);
+
+  /* ── Re-extract from edited raw_transcript ── */
+  const reExtractFromRaw = useCallback(async (newRawText: string) => {
+    setReExtracting(true);
+    try {
+      const res = await fetch('/api/diagnose', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: newRawText, context: [], location: locRef.current }),
+      });
+      const d: ApiResponse = await res.json();
+      if (!d.error) {
+        // pendingDataRefを上書き（raw_transcriptは保持）
+        const rawKeep = newRawText;
+        pendingDataRef.current = { ...d, raw_transcript: rawKeep };
+        delete pendingDataRef.current.admin_log; // buildConfirmItemsで再生成
+        const items = buildConfirmItems();
+        setConfirmItems(items);
+      }
+    } catch {
+      // API失敗時は何もしない（現在の値を維持）
+    }
+    setReExtracting(false);
+  }, [buildConfirmItems]);
 
   /* ── Start Listening ── */
   const startListen = useCallback(() => {
@@ -1246,6 +1282,7 @@ export default function AgriBuddy() {
             <ConfirmScreen
               confirmItems={confirmItems} onUpdate={updateConfirmItem}
               onSave={saveFromConfirm} onReset={reset}
+              onReExtract={reExtractFromRaw} reExtracting={reExtracting}
             />
           )}
 
