@@ -1,0 +1,15 @@
+{
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "biwa-whisperer-universal.vercel.app"
+        }
+      ],
+      "destination": "https://agri-buddy-v2.vercel.app/$1",
+      "permanent": true
+    }
+  ]
+}
