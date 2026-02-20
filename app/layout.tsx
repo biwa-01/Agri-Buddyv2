@@ -26,8 +26,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ja" style={{ colorScheme: 'light' }}>
       <body className={`${notoSansJP.variable} ${notoSerifJP.variable} font-sans antialiased min-h-screen bg-stone-100`}>
         <div className="fixed inset-0 z-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="https://images.unsplash.com/photo-1500382017468-9049fed747ef?w=1200&q=80"
+            src="/bg-farm.jpg"
             alt="" className="absolute inset-0 w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-stone-900/50 via-stone-800/40 to-stone-900/70" />

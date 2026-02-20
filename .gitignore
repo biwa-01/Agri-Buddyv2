@@ -15,6 +15,10 @@ out/
 *.tsbuildinfo
 next-env.d.ts
 
+# certificates
+certificates/
+public/rootCA.pem
+
 # repomix
 repomix-output.xml
 repomix-*.xml

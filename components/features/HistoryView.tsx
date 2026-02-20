@@ -9,7 +9,6 @@ import { GLASS, CARD_FLAT, DAY_NAMES, GENERIC_ADVICE_RE } from '@/lib/constants'
 import { fmtVal, extractNextActions, sanitizeLocation } from '@/lib/logic/extraction';
 import { generateOfficialReport } from '@/lib/logic/report';
 import { loadRecs } from '@/lib/client/storage';
-import { createRecog } from '@/lib/client/speech';
 import { ChartTooltip } from '@/components/ui/ChartTooltip';
 import { Linkify } from '@/components/ui/Linkify';
 
@@ -157,8 +156,12 @@ export function HistoryView({
 
   /* ── Voice search ── */
   const startVoiceSearch = useCallback(() => {
-    const recog = createRecog();
-    if (!recog) return;
+    // シングルトンを使わず独立インスタンスを生成（メインrecogの設定を破壊しない）
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any; const SR = w.webkitSpeechRecognition || w.SpeechRecognition;
+    if (!SR) return;
+    const recog = new SR();
+    recog.lang = 'ja-JP';
     recog.continuous = false;
     recog.interimResults = false;
     setIsVoiceSearching(true);
@@ -498,14 +501,16 @@ export function HistoryView({
                 <p className="text-lg font-black text-green-800">推定 +{calSelected.estimated_profit >= 10000 ? `${(calSelected.estimated_profit / 10000).toFixed(1)}万円` : `${calSelected.estimated_profit.toLocaleString()}円`}</p>
               </div>
             )}
-            {/* raw_transcript: ユーザーエリア — 白系・太字ゴシック・Micアイコン */}
+            {/* raw_transcript: 折りたたみ */}
             {calSelected.raw_transcript && (
-              <div className="mt-3 p-4 rounded-xl bg-white border-2 border-stone-300">
-                <p className="text-xl font-black text-stone-700 mb-1 flex items-center gap-1.5">
-                  <Mic className="w-5 h-5" />音声入力（原文）
-                </p>
-                <pre className="text-xl font-bold text-stone-800 whitespace-pre-wrap leading-relaxed font-sans">{calSelected.raw_transcript}</pre>
-              </div>
+              <details className="mt-3">
+                <summary className="text-sm font-bold text-stone-500 cursor-pointer flex items-center gap-1.5">
+                  <Mic className="w-4 h-4" />音声入力（原文）を表示
+                </summary>
+                <div className="mt-2 p-4 rounded-xl bg-white border-2 border-stone-300">
+                  <pre className="text-xl font-bold text-stone-800 whitespace-pre-wrap leading-relaxed font-sans">{calSelected.raw_transcript}</pre>
+                </div>
+              </details>
             )}
             {/* admin_log: 青系カード — 明朝体・Botアイコン */}
             {calSelected.admin_log && (
@@ -525,21 +530,32 @@ export function HistoryView({
               );
               const { analysisOnly, actions } = extractNextActions(calSelected.advice || '', calSelected.strategic_advice || '');
               const strategicLines = (calSelected.strategic_advice || '').split('\n').filter(l => !/^次回:\s*/.test(l)).join('\n').trim();
+
+              const REF_RE = /^【参考】/;
+              const allLines = (analysisOnly || '').split('\n').filter(l => l.trim() && !REF_RE.test(l));
+              const adviceLines = allLines.filter(l => !GENERIC_ADVICE_RE.test(l));
+
               return (<>
-                {(strategicLines || analysisOnly) && (
+                {/* ── Advice block: Blue-50 / serif ── */}
+                {(adviceLines.length > 0 || (strategicLines && !GENERIC_ADVICE_RE.test(strategicLines))) && (
                   <div className="mt-3 p-4 rounded-xl bg-blue-50/70 border border-blue-200/50">
                     <p className="text-xl font-bold text-blue-700 mb-1 flex items-center gap-1.5">
-                      <Sprout className="w-5 h-5" />営農分析
+                      <Sprout className="w-5 h-5" />AIからのコメント
                     </p>
                     {strategicLines && !GENERIC_ADVICE_RE.test(strategicLines) && (
                       <p className="text-xl font-medium text-blue-800 whitespace-pre-line mb-2 font-serif"><Linkify text={strategicLines} /></p>
                     )}
-                    {analysisOnly && !GENERIC_ADVICE_RE.test(analysisOnly) && (
-                      <p className="text-xl font-medium text-stone-600 whitespace-pre-line leading-relaxed font-serif"><Linkify text={analysisOnly} /></p>
+                    {adviceLines.length > 0 && (
+                      <div className="space-y-1">
+                        {adviceLines.map((a, i) => (
+                          <p key={i} className="text-xl font-medium text-stone-600 leading-relaxed font-serif">{a}</p>
+                        ))}
+                      </div>
                     )}
                   </div>
                 )}
-                {actions.length > 0 && !strategicLines && (
+                {/* ── Next actions: only when NO strategicLines ── */}
+                {actions.length > 0 && !strategicLines ? (
                   <div className="mt-3 p-4 rounded-xl bg-orange-50/70 border border-orange-200/50">
                     <p className="text-xl font-bold text-orange-700 mb-1 flex items-center gap-1.5">
                       <TrendingUp className="w-5 h-5" />ネクストアクション
@@ -552,7 +568,7 @@ export function HistoryView({
                       ))}
                     </ul>
                   </div>
-                )}
+                ) : null}
               </>);
             })()}
           </div>

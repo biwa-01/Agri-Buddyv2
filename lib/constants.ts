@@ -18,7 +18,7 @@ export const CARD_ACCENT = 'bg-gradient-to-br from-amber-50/90 to-orange-50/80 b
 export const CARD_INSET = 'bg-stone-50/40 border border-stone-200/30 shadow-inner';
 
 /* ── Voice command patterns ── */
-export const SKIP_RE = /(スキップ|なし|ない|いいえ|いえ|特にない|ありません|パス|とくにない|なかった)/i;
+export const SKIP_RE = /(スキップ|なし|特にない|特になし|ありません|パス|とくにない)/i;
 export const PHOTO_RE = /写真|カメラ|撮って|撮影|撮るよ/;
 export const DONE_RE = /以上です|いじょうです|以上|終わり|おわり|終了|しゅうりょう/;
 export const CONFIRM_RE = /確定|かくてい|次へ|つぎへ|OK|オッケー|オーケー|送信|そうしん|決定|けってい|完了|かんりょう|できた/;
@@ -49,14 +49,14 @@ export const AGRI_CORRECTIONS: [RegExp, string][] = [
 ];
 
 export const FOLLOW_UP_QUESTIONS: Record<FollowUpStep, string[]> = {
-  WORK: ['今日はどんな作業した？', 'お疲れ様！今日は何頑張った？', '今日の仕事、教えて！'],
-  HOUSE_TEMP: ['ハウスの温度は？（最高・最低も教えて）', '温度はどのくらいだった？（最高と最低）', 'ハウス何度くらい？'],
-  FERTILIZER: ['栄養（肥料）はあげた？', '木に御飯（肥料）あげた？', '肥料の話、なんかある？'],
-  PEST: ['虫や病気、気になるとこなかった？', '虫や病気は大丈夫だった？', '変な虫とか出てない？'],
-  HARVEST: ['今日なにか穫れた？', '収穫はあった？', '穫れたもの、あれば教えて！'],
-  COST: ['お金かかったものある？（資材・燃料とか）', '出費はなんかあった？', '買ったものとか、ある？'],
-  DURATION: ['どのくらい頑張った？（時間）', '何時間くらい作業した？', '作業時間、ざっくりでいいよ！'],
-  PHOTO: ['写真、残しとく？', '今の様子、撮っとく？', '記録写真、どう？'],
+  WORK: ['今日はどんな作業しました？'],
+  HOUSE_TEMP: ['ハウスの温度はどうでした？最高と最低、どっちも教えてくれると助かります！'],
+  FERTILIZER: ['肥料や栄養、何かあげました？'],
+  PEST: ['病気や虫、気になるヤツはいませんでしたか？'],
+  HARVEST: ['収穫、ありましたか？どのくらい穫れたか教えてください！'],
+  COST: ['資材や燃料とか、お金かかったものあります？'],
+  DURATION: ['今日、何時間くらい頑張りました？'],
+  PHOTO: ['最後！写真残しておきますか？'],
 };
 
 /* ── Structured extraction: classify input to step ── */
@@ -89,9 +89,6 @@ export const REFERENCE_LINKS = [
 ];
 
 /* ── IndexedDB constants ── */
-/* ── iOS Safari voice cycle hard limit ── */
-export const IOS_MAX_VOICE_QUESTIONS = 3;
-
 export const MEDIA_DB = 'agri-buddy-media';
 export const MEDIA_STORE = 'media';
 export const MAX_MEDIA_PER_RECORD = 5;

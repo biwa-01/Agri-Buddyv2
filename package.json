@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "dev": "next dev",
+    "dev:s": "node scripts/https-proxy.mjs",
     "build": "next build",
     "start": "next start"
   },

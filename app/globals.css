@@ -16,10 +16,10 @@ html {
 
 /* ── Mic button pulse ── */
 @keyframes biwa-pulse {
-  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,140,0,0.5); }
-  50% { transform: scale(1.05); box-shadow: 0 0 0 24px rgba(255,140,0,0); }
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.85; }
 }
-.biwa-pulse { animation: biwa-pulse 2.5s ease-in-out infinite; }
+.biwa-pulse { animation: biwa-pulse 2.5s ease-in-out infinite; will-change: transform, opacity; }
 
 /* ── Listening ring ── */
 @keyframes listening-ring {
@@ -127,7 +127,7 @@ html {
   top: -10px;
   z-index: 51;
   border-radius: 2px;
-  animation: confetti-fall 3s ease-in forwards;
+  animation: confetti-fall 2.2s ease-in forwards;
 }
 .confetti-piece:nth-child(1) { left: 10%; background: #FF8C00; animation-delay: 0s; }
 .confetti-piece:nth-child(2) { left: 25%; background: #22C55E; animation-delay: 0.2s; width: 8px; height: 12px; }
@@ -144,11 +144,6 @@ html {
 .confetti-piece:nth-child(13) { left: 63%; background: #06B6D4; animation-delay: 0.1s; }
 .confetti-piece:nth-child(14) { left: 78%; background: #FBBF24; animation-delay: 0.4s; width: 11px; height: 7px; }
 .confetti-piece:nth-child(15) { left: 92%; background: #34D399; animation-delay: 0.65s; width: 8px; height: 12px; }
-.confetti-piece:nth-child(16) { left: 8%; background: #818CF8; animation-delay: 0.3s; width: 12px; height: 8px; }
-.confetti-piece:nth-child(17) { left: 38%; background: #FB923C; animation-delay: 0.5s; }
-.confetti-piece:nth-child(18) { left: 52%; background: #2DD4BF; animation-delay: 0.2s; width: 7px; height: 11px; }
-.confetti-piece:nth-child(19) { left: 75%; background: #E879F9; animation-delay: 0.45s; width: 12px; height: 8px; }
-.confetti-piece:nth-child(20) { left: 88%; background: #FF6B00; animation-delay: 0.7s; }
 
 /* ── View enter (tab switch) ── */
 @keyframes view-enter {
@@ -170,3 +165,17 @@ html {
   50% { transform: translateY(4px); opacity: 1; }
 }
 .scroll-hint-bounce { animation: scroll-hint-bounce 2s ease-in-out infinite; }
+
+/* ── Filter slide-down (location sub-chips) ── */
+@keyframes filter-slide-down {
+  from { max-height: 0; opacity: 0; }
+  to { max-height: 200px; opacity: 1; }
+}
+.filter-slide-down { animation: filter-slide-down 0.25s ease-out forwards; overflow: hidden; }
+
+/* ── Empathy card warm glow ── */
+@keyframes empathy-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.15); }
+  50% { box-shadow: 0 0 30px rgba(245, 158, 11, 0.3); }
+}
+.empathy-glow { animation: empathy-glow 3s ease-in-out infinite; }
