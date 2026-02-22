@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getGeminiModel, callWithRetry } from '@/lib/gemini';
 
 const MOCK = process.env.NEXT_PUBLIC_MOCK_MODE === 'true';
 
@@ -33,19 +33,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: 'GOOGLE_GEMINI_API_KEY未設定' }, { status: 500 });
-    }
+    const model = getGeminiModel();
 
     const buffer = Buffer.from(await file.arrayBuffer());
     const base64 = buffer.toString('base64');
     const mimeType = file.type || 'image/jpeg';
 
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-
-    const result = await model.generateContent([
+    const result = await callWithRetry(() => model.generateContent([
       {
         inlineData: { data: base64, mimeType },
       },
@@ -70,7 +64,7 @@ JSONのみを返してください。マークダウンのコードブロック�
   "slots": { ... }
 }`,
       },
-    ]);
+    ]));
 
     const text = result.response.text().trim();
     const cleaned = text.replace(/^```json?\s*/i, '').replace(/```\s*$/, '').trim();

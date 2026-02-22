@@ -19,8 +19,8 @@ npm start          # production起動
 | File | Role |
 |---|---|
 | `app/page.tsx` | 全フロントエンド。単一`'use client'`コンポーネント。音声UI・状態マシン・カレンダー・レポート生成・確認画面 |
-| `app/api/diagnose/route.ts` | POSTエンドポイント。音声テキスト → Gemini 2.0 Flash でスロット抽出・アドバイス生成。API失敗時はローカル関数フォールバック |
-| `app/api/voice-correct/route.ts` | CONFIRM画面の音声修正。Gemini 2.0 Flashで修正指示を解析、ローカルregexフォールバック付き |
+| `app/api/diagnose/route.ts` | POSTエンドポイント。音声テキスト → Gemini 2.5 Flash-Lite でスロット抽出・アドバイス生成。API失敗時はローカル関数フォールバック |
+| `app/api/voice-correct/route.ts` | CONFIRM画面の音声修正。Gemini 2.5 Flash-Liteで修正指示を解析、ローカルregexフォールバック付き |
 | `app/layout.tsx` | ルートレイアウト。Noto Sans JP、暗めオーバーレイの農園背景 |
 | `app/globals.css` | Tailwind v4テーマ（`@import "tailwindcss"`構文）、カスタムアニメーション群 |
 
@@ -36,7 +36,8 @@ Follow-upはrefsベース（`followUpActiveRef`, `followUpQueueRef`, `pendingDat
 
 ### API Mode
 
-常にGemini 2.0 Flash APIを使用。`GOOGLE_GEMINI_API_KEY`必須。
+常にGemini 2.5 Flash-Lite APIを使用（`lib/gemini.ts`で一元管理）。`GOOGLE_GEMINI_API_KEY`必須。
+- 429リトライ: `callWithRetry()`が全ルート共通でretryDelay解析→1回リトライ
 - スロット抽出・アドバイス・admin_log全てをGeminiが生成
 - 天気データ（outdoor）をプロンプトに注入 → 天気連動アドバイス
 - API失敗時: ローカル関数（`generateAdvice`等）でフォールバック → 最低限の記録は可能

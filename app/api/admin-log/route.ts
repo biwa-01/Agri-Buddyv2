@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getGeminiModel, callWithRetry } from '@/lib/gemini';
 import { GEMINI_PROMPT_SECTIONS } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
@@ -8,13 +8,7 @@ export async function POST(req: NextRequest) {
       items: { key: string; label: string; value: string }[];
     };
 
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ error: 'APIキー未設定' }, { status: 500 });
-    }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = getGeminiModel();
 
     const fieldsStr = items
       .filter(it => it.value && it.value.trim())
@@ -55,7 +49,7 @@ ${fieldsStr}
 【出力JSON】
 { "admin_log": "体言止め・箇条書きの営農日誌テキスト" }`;
 
-    const result = await model.generateContent(prompt);
+    const result = await callWithRetry(() => model.generateContent(prompt));
     const text = result.response.text().replace(/```json|```/g, '').trim();
     return NextResponse.json(JSON.parse(text));
   } catch (error) {
