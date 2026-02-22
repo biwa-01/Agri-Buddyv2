@@ -19,7 +19,8 @@ npm start          # production起動
 | File | Role |
 |---|---|
 | `app/page.tsx` | 全フロントエンド。単一`'use client'`コンポーネント。音声UI・状態マシン・カレンダー・レポート生成・確認画面 |
-| `app/api/diagnose/route.ts` | POSTエンドポイント。音声テキストからスロット抽出 → Gemini 2.0 Flash or Mock正規表現 |
+| `app/api/diagnose/route.ts` | POSTエンドポイント。音声テキスト → Gemini 2.0 Flash でスロット抽出・アドバイス生成。API失敗時はローカル関数フォールバック |
+| `app/api/voice-correct/route.ts` | CONFIRM画面の音声修正。Gemini 2.0 Flashで修正指示を解析、ローカルregexフォールバック付き |
 | `app/layout.tsx` | ルートレイアウト。Noto Sans JP、暗めオーバーレイの農園背景 |
 | `app/globals.css` | Tailwind v4テーマ（`@import "tailwindcss"`構文）、カスタムアニメーション群 |
 
@@ -33,13 +34,13 @@ npm start          # production起動
 
 Follow-upはrefsベース（`followUpActiveRef`, `followUpQueueRef`, `pendingDataRef`, `advanceFollowUpRef`）。async境界でのstale closure回避のため。
 
-### API Dual Mode
+### API Mode
 
-`NEXT_PUBLIC_MOCK_MODE`で切替:
-- `true`: 正規表現スロット抽出。APIキー不要、高速、決定的
-- `false`: Gemini 2.0 Flash。完全なNLU + JSON構造化出力
-
-両モード共通: 常に`status: "complete"`を返す（Silent Completionパターン）。不足項目は`missing_hints`で通知のみ。
+常にGemini 2.0 Flash APIを使用。`GOOGLE_GEMINI_API_KEY`必須。
+- スロット抽出・アドバイス・admin_log全てをGeminiが生成
+- 天気データ（outdoor）をプロンプトに注入 → 天気連動アドバイス
+- API失敗時: ローカル関数（`generateAdvice`等）でフォールバック → 最低限の記録は可能
+- 常に`status: "complete"`を返す（Silent Completionパターン）。不足項目は`missing_hints`で通知のみ。
 
 ### Data Flow
 
@@ -61,7 +62,6 @@ Follow-upはrefsベース（`followUpActiveRef`, `followUpQueueRef`, `pendingDat
 ## Environment (.env.local)
 
 ```
-GOOGLE_GEMINI_API_KEY=...        # Gemini APIキー（mock off時必須）
-NEXT_PUBLIC_MOCK_MODE=true       # true=正規表現mock, false=Gemini API
+GOOGLE_GEMINI_API_KEY=...        # Gemini APIキー（必須）
 NEXT_PUBLIC_APP_NAME=Agri-Buddy  # アプリ表示名
 ```

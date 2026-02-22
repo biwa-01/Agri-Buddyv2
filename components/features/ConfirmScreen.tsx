@@ -13,9 +13,13 @@ interface ConfirmScreenProps {
   onReset: () => void;
   onReExtract?: (text: string) => void;
   reExtracting?: boolean;
+  onVoiceCorrection?: () => void;
+  isListeningCorrection?: boolean;
+  correctionTranscript?: string;
+  saving?: boolean;
 }
 
-export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onReExtract, reExtracting }: ConfirmScreenProps) {
+export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onReExtract, reExtracting, onVoiceCorrection, isListeningCorrection, correctionTranscript, saving }: ConfirmScreenProps) {
   // Split items into sections
   const rawItem = confirmItems.find(it => it.key === 'raw_transcript');
   const adminItem = confirmItems.find(it => it.key === 'admin_log');
@@ -108,11 +112,31 @@ export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onReExt
             </div>
           )}
         </div>
+        {/* Voice correction area */}
+        {correctionTranscript && isListeningCorrection && (
+          <div className="mt-3 p-3 rounded-xl bg-amber-50 border border-amber-300">
+            <p className="text-sm font-bold text-amber-700">{correctionTranscript}</p>
+          </div>
+        )}
         <div className="mt-5 flex gap-3">
-          <button onClick={onSave}
-            className="flex-1 py-5 rounded-3xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-2xl font-black shadow-lg btn-press flex items-center justify-center gap-2">
-            <Check className="w-7 h-7" /> 保存する
+          <button onClick={onSave} disabled={saving}
+            className={`flex-1 py-5 rounded-3xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-2xl font-black shadow-lg btn-press flex items-center justify-center gap-2 ${saving ? 'opacity-70' : ''}`}>
+            {saving ? (
+              <><span className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin inline-block" /> 日誌生成中...</>
+            ) : (
+              <><Check className="w-7 h-7" /> 保存する</>
+            )}
           </button>
+          {onVoiceCorrection && (
+            <button onClick={onVoiceCorrection}
+              className={`py-5 px-5 rounded-2xl btn-press flex items-center justify-center ${
+                isListeningCorrection
+                  ? 'bg-red-500 text-white animate-pulse'
+                  : 'bg-stone-200/80 text-stone-600'
+              }`}>
+              <Mic className="w-6 h-6" />
+            </button>
+          )}
           <button onClick={onReset}
             className="py-5 px-6 rounded-2xl bg-stone-200/80 text-stone-600 text-xl font-bold btn-press flex items-center justify-center gap-2">
             <X className="w-6 h-6" /> 破棄

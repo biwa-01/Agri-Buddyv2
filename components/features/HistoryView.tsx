@@ -6,7 +6,7 @@ import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 import type { LocalRecord, View } from '@/lib/types';
 import { GLASS, CARD_FLAT, DAY_NAMES, GENERIC_ADVICE_RE } from '@/lib/constants';
-import { fmtVal, extractNextActions, sanitizeLocation } from '@/lib/logic/extraction';
+import { fmtVal, extractNextActions, sanitizeLocation, extractCorrections, buildRecordChips } from '@/lib/logic/extraction';
 import { generateOfficialReport } from '@/lib/logic/report';
 import { loadRecs } from '@/lib/client/storage';
 import { ChartTooltip } from '@/components/ui/ChartTooltip';
@@ -456,6 +456,53 @@ export function HistoryView({
         <section ref={detailRef} className="mx-2 mb-4 fade-up">
           <div className={`p-5 rounded-2xl ${GLASS}`}>
             <p className="text-4xl font-black text-amber-700 mb-3">{calDate}</p>
+            {/* ── チップ帯 ── */}
+            {(() => {
+              const chips = buildRecordChips(calSelected);
+              if (chips.length === 0) return null;
+              const colorMap: Record<string, string> = {
+                amber: 'bg-amber-100 text-amber-800 border-amber-200',
+                blue: 'bg-blue-100 text-blue-800 border-blue-200',
+                green: 'bg-green-100 text-green-800 border-green-200',
+                orange: 'bg-orange-100 text-orange-800 border-orange-200',
+                red: 'bg-red-100 text-red-800 border-red-200',
+                purple: 'bg-purple-100 text-purple-800 border-purple-200',
+              };
+              return (
+                <div className="flex flex-wrap gap-1.5 my-3">
+                  {chips.map((c, i) => (
+                    <span key={i} className={`text-sm font-bold px-2.5 py-1 rounded-full border ${colorMap[c.color] || 'bg-stone-100 text-stone-700'}`}>
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
+            {/* ── admin_log: 青系カード — 位置昇格 ── */}
+            {calSelected.admin_log && (
+              <div className="mt-3 p-4 rounded-xl bg-blue-50 border-2 border-blue-300">
+                <p className="text-xl font-black text-blue-800 mb-1 flex items-center gap-1.5">
+                  <Sprout className="w-5 h-5" />AI補正後の日誌
+                </p>
+                <pre className="text-xl font-medium text-blue-900 whitespace-pre-wrap leading-relaxed font-serif">{calSelected.admin_log}</pre>
+              </div>
+            )}
+            {/* ── AI補正バッジ ── */}
+            {calSelected.raw_transcript && (() => {
+              const corrections = extractCorrections(calSelected.raw_transcript);
+              if (corrections.length === 0) return null;
+              return (
+                <div className="flex flex-wrap gap-1.5 mt-2 mb-3">
+                  {corrections.map((c, i) => (
+                    <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200">
+                      <span className="line-through opacity-60">{c.original}</span>
+                      <span className="mx-0.5">{'\u2192'}</span>
+                      <span className="font-bold">{c.corrected}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
             {calSelected.house_data && (
               <div className="grid grid-cols-3 gap-2 text-center mb-3">
                 <div><p className="text-5xl font-black text-stone-900">{fmtVal(calSelected.house_data.max_temp, '℃')}</p><p className="text-xl font-bold text-stone-600">最高</p></div>
@@ -463,8 +510,20 @@ export function HistoryView({
                 <div><p className="text-5xl font-black text-stone-900">{fmtVal(calSelected.house_data.humidity, '%')}</p><p className="text-xl font-bold text-stone-600">湿度</p></div>
               </div>
             )}
+            <div className="space-y-3 text-2xl">
+              {calSelected.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {calSelected.work_log}</span></div>}
+              {calSelected.work_duration && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">時間:</b> {calSelected.work_duration}</span></div>}
+              {calSelected.fertilizer && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">施肥:</b> {calSelected.fertilizer}</span></div>}
+              {calSelected.pest_status && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">病害虫:</b> {calSelected.pest_status}</span></div>}
+              {calSelected.harvest_amount && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">収穫:</b> {calSelected.harvest_amount}</span></div>}
+              {calSelected.material_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">資材費:</b> {calSelected.material_cost}</span></div>}
+              {calSelected.fuel_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">燃料費:</b> {calSelected.fuel_cost}</span></div>}
+              {calSelected.plant_status && calSelected.plant_status !== '良好' && (
+                <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">所見:</b> {calSelected.plant_status}</span></div>
+              )}
+            </div>
             {selectedMedia.length > 0 && (
-              <div className="grid grid-cols-2 gap-2 mb-3">
+              <div className="grid grid-cols-2 gap-2 my-3">
                 {selectedMedia.map((m, i) => (
                   <button key={i} onClick={() => setFullscreenMedia(m)} className="relative rounded-xl overflow-hidden border border-stone-200/50 btn-press">
                     {m.type === 'video' ? (
@@ -483,42 +542,10 @@ export function HistoryView({
                 ))}
               </div>
             )}
-            <div className="space-y-3 text-2xl">
-              {calSelected.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {calSelected.work_log}</span></div>}
-              {calSelected.work_duration && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">時間:</b> {calSelected.work_duration}</span></div>}
-              {calSelected.fertilizer && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">施肥:</b> {calSelected.fertilizer}</span></div>}
-              {calSelected.pest_status && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">病害虫:</b> {calSelected.pest_status}</span></div>}
-              {calSelected.harvest_amount && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">収穫:</b> {calSelected.harvest_amount}</span></div>}
-              {calSelected.material_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">資材費:</b> {calSelected.material_cost}</span></div>}
-              {calSelected.fuel_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">燃料費:</b> {calSelected.fuel_cost}</span></div>}
-              {calSelected.plant_status && calSelected.plant_status !== '良好' && (
-                <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">所見:</b> {calSelected.plant_status}</span></div>
-              )}
-            </div>
             {calSelected.estimated_profit != null && calSelected.estimated_profit > 0 && (
               <div className="mt-3 p-3 rounded-xl bg-green-50/70 border border-green-200/50">
                 <p className="text-sm font-bold text-green-700 mb-1">見込み増益</p>
                 <p className="text-lg font-black text-green-800">推定 +{calSelected.estimated_profit >= 10000 ? `${(calSelected.estimated_profit / 10000).toFixed(1)}万円` : `${calSelected.estimated_profit.toLocaleString()}円`}</p>
-              </div>
-            )}
-            {/* raw_transcript: 折りたたみ */}
-            {calSelected.raw_transcript && (
-              <details className="mt-3">
-                <summary className="text-sm font-bold text-stone-500 cursor-pointer flex items-center gap-1.5">
-                  <Mic className="w-4 h-4" />音声入力（原文）を表示
-                </summary>
-                <div className="mt-2 p-4 rounded-xl bg-white border-2 border-stone-300">
-                  <pre className="text-xl font-bold text-stone-800 whitespace-pre-wrap leading-relaxed font-sans">{calSelected.raw_transcript}</pre>
-                </div>
-              </details>
-            )}
-            {/* admin_log: 青系カード — 明朝体・Botアイコン */}
-            {calSelected.admin_log && (
-              <div className="mt-3 p-4 rounded-xl bg-blue-50 border-2 border-blue-300">
-                <p className="text-xl font-black text-blue-800 mb-1 flex items-center gap-1.5">
-                  <Sprout className="w-5 h-5" />AI補正後の日誌
-                </p>
-                <pre className="text-xl font-medium text-blue-900 whitespace-pre-wrap leading-relaxed font-serif">{calSelected.admin_log}</pre>
               </div>
             )}
             {(calSelected.strategic_advice || calSelected.advice) && (() => {
@@ -571,6 +598,17 @@ export function HistoryView({
                 ) : null}
               </>);
             })()}
+            {/* ── raw_transcript: 最下部に降格 ── */}
+            {calSelected.raw_transcript && (
+              <details className="mt-3">
+                <summary className="text-sm font-bold text-stone-500 cursor-pointer flex items-center gap-1.5">
+                  <Mic className="w-4 h-4" />音声入力（原文）を表示
+                </summary>
+                <div className="mt-2 p-4 rounded-xl bg-white border-2 border-stone-300">
+                  <pre className="text-xl font-bold text-stone-800 whitespace-pre-wrap leading-relaxed font-sans">{calSelected.raw_transcript}</pre>
+                </div>
+              </details>
+            )}
           </div>
         </section>
         <section className="mx-5 mb-4">

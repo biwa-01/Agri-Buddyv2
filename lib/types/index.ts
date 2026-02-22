@@ -10,9 +10,12 @@ export interface PartialSlots {
   location?: string;
 }
 
+export type MissingQuestionKey = 'WORK' | 'HOUSE_TEMP' | 'FERTILIZER' | 'PEST' | 'HARVEST' | 'COST' | 'DURATION';
+
 export interface ApiResponse {
   status: 'complete'; reply: string;
   missing_hints?: string[]; confidence?: Confidence;
+  missing_questions?: MissingQuestionKey[];
   house_data?: HouseData | null; work_log?: string; plant_status?: string;
   advice?: string; strategic_advice?: string; admin_log?: string;
   fertilizer?: string; pest_status?: string;

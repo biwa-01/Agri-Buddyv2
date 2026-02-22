@@ -20,7 +20,11 @@
       "Bash(pip3 install:*)",
       "Bash(python3:*)",
       "Bash(qlmanage:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(npx vercel:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

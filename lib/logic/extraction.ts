@@ -1,6 +1,36 @@
 import { AGRI_CORRECTIONS, WORK_CHIPS, NAV_NOISE_RE, FILLER_RE, LOCATION_GHOST_RE } from '@/lib/constants';
-import type { PartialSlots, ConfirmItem } from '@/lib/types';
+import type { PartialSlots, ConfirmItem, LocalRecord } from '@/lib/types';
 import { isNegativeInput } from '@/lib/logic/advice';
+
+export function extractCorrections(rawText: string): { original: string; corrected: string }[] {
+  const results: { original: string; corrected: string }[] = [];
+  if (!rawText) return results;
+  for (const [pattern, replacement] of AGRI_CORRECTIONS) {
+    const match = rawText.match(pattern);
+    if (match && match[0] !== replacement) {
+      results.push({ original: match[0], corrected: replacement });
+    }
+  }
+  return results;
+}
+
+export function buildRecordChips(rec: LocalRecord): { label: string; color: string }[] {
+  const chips: { label: string; color: string }[] = [];
+  if (rec.work_log) {
+    for (const w of WORK_CHIPS) {
+      if (w.p.test(rec.work_log)) chips.push({ label: w.l, color: 'amber' });
+    }
+  }
+  if (rec.house_data?.max_temp != null) chips.push({ label: `${rec.house_data.max_temp}℃`, color: 'blue' });
+  if (rec.harvest_amount && !isNegativeInput(rec.harvest_amount))
+    chips.push({ label: `収穫 ${rec.harvest_amount}`, color: 'green' });
+  if (rec.fertilizer && !isNegativeInput(rec.fertilizer))
+    chips.push({ label: `施肥 ${rec.fertilizer}`, color: 'orange' });
+  if (rec.pest_status && !isNegativeInput(rec.pest_status))
+    chips.push({ label: rec.pest_status, color: 'red' });
+  if (rec.work_duration) chips.push({ label: rec.work_duration, color: 'purple' });
+  return chips;
+}
 
 export function correctAgriTerms(text: string): string {
   let result = text;
@@ -130,6 +160,73 @@ export function buildSlotsFromConfirmItems(items: ConfirmItem[]): PartialSlots {
   if (!isNaN(minN)) slots.min_temp = minN;
   if (!isNaN(humN)) slots.humidity = humN;
   return slots;
+}
+
+/* ── Voice Correction Parser (CONFIRM画面音声修正) ── */
+const CORRECTION_LABEL_MAP: Record<string, string> = {
+  '場所': 'location', 'ばしょ': 'location',
+  '作業': 'work_log', '作業内容': 'work_log',
+  '最高気温': 'max_temp', '最高': 'max_temp',
+  '最低気温': 'min_temp', '最低': 'min_temp',
+  '湿度': 'humidity',
+  '肥料': 'fertilizer', 'ひりょう': 'fertilizer',
+  '病害虫': 'pest_status', '害虫': 'pest_status', '病気': 'pest_status',
+  '収穫': 'harvest_amount', 'しゅうかく': 'harvest_amount',
+  '資材費': 'material_cost', '資材': 'material_cost',
+  '燃料費': 'fuel_cost', '燃料': 'fuel_cost',
+  '作業時間': 'work_duration', '時間': 'work_duration',
+};
+
+const NEGATIVE_CORRECTION_RE = /なし|ない|やってない|ません|ゼロ|０|なかった/;
+
+export function parseVoiceCorrection(text: string): { key: string; value: string }[] {
+  const results: { key: string; value: string }[] = [];
+  const cleaned = text.replace(/\s+/g, '');
+
+  // Pattern 1: 「XはYに変更」「XをYに変更して」
+  const changeRe = /(.+?)[はをの](.+?)に(?:変更|修正|直して|して)/g;
+  let m: RegExpExecArray | null;
+  while ((m = changeRe.exec(cleaned)) !== null) {
+    const label = m[1].trim();
+    const value = m[2].trim();
+    const key = CORRECTION_LABEL_MAP[label];
+    if (key) {
+      results.push({ key, value: NEGATIVE_CORRECTION_RE.test(value) ? '' : value });
+    }
+  }
+  if (results.length > 0) return results;
+
+  // Pattern 2: 「最高気温32度」「湿度80パーセント」
+  const directRe = /(最高気温|最低気温|最高|最低|湿度|作業時間)\s*(\d+)\s*(度|℃|%|％|パーセント|時間|じかん)?/g;
+  while ((m = directRe.exec(cleaned)) !== null) {
+    const key = CORRECTION_LABEL_MAP[m[1]];
+    if (key) {
+      const unit = key === 'humidity' ? '%' : key.includes('temp') ? '℃' : key === 'work_duration' ? '時間' : '';
+      results.push({ key, value: `${m[2]}${unit}` });
+    }
+  }
+  if (results.length > 0) return results;
+
+  // Pattern 3: 「肥料なし」「害虫なし」(negation)
+  const negRe = /(場所|作業|肥料|ひりょう|病害虫|害虫|病気|収穫|しゅうかく|資材費?|燃料費?|作業時間)[はがを]?(?:なし|ない|やってない|ません|ゼロ|なかった)/g;
+  while ((m = negRe.exec(cleaned)) !== null) {
+    const key = CORRECTION_LABEL_MAP[m[1]] || CORRECTION_LABEL_MAP[m[1].replace(/費$/, '')];
+    if (key) results.push({ key, value: '' });
+  }
+  if (results.length > 0) return results;
+
+  // Pattern 4: 「場所はBハウス」「肥料は硫安2キロ」
+  const simpleRe = /(場所|作業内容?|肥料|ひりょう|病害虫|害虫|収穫|資材費?|燃料費?|作業時間)[はを](.+)/;
+  const sm = cleaned.match(simpleRe);
+  if (sm) {
+    const key = CORRECTION_LABEL_MAP[sm[1]] || CORRECTION_LABEL_MAP[sm[1].replace(/費$/, '')];
+    const value = sm[2].replace(/[にへ]?(?:変更|修正|して).*$/, '').trim();
+    if (key) {
+      results.push({ key, value: NEGATIVE_CORRECTION_RE.test(value) ? '' : value });
+    }
+  }
+
+  return results;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
