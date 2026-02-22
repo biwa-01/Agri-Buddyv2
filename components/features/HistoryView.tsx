@@ -17,7 +17,7 @@ const FILTER_CHIPS = [
   { key: 'harvest',    label: '収穫', match: (r: LocalRecord) => !!r.harvest_amount },
   { key: 'fertilizer', label: '施肥', match: (r: LocalRecord) => !!r.fertilizer },
   { key: 'pest',       label: '防除', match: (r: LocalRecord) => !!r.pest_status },
-  { key: 'irrigation', label: '灌水', match: (r: LocalRecord) => /灌水|水やり|かんすい/.test(r.work_log) },
+  { key: 'irrigation', label: '灌水', match: (r: LocalRecord) => /灌水|水やり|かんすい/.test(r.work_log || '') },
   { key: 'work',       label: '作業', match: (r: LocalRecord) => !!r.work_log },
 ] as const;
 
@@ -187,10 +187,10 @@ export function HistoryView({
   /* ── Record summary for result cards ── */
   const summarize = (r: LocalRecord) => {
     const parts: string[] = [];
-    if (r.work_log) parts.push(r.work_log.slice(0, 30));
-    if (r.fertilizer) parts.push(`施肥: ${r.fertilizer.slice(0, 20)}`);
-    if (r.harvest_amount) parts.push(`収穫: ${r.harvest_amount.slice(0, 20)}`);
-    if (r.pest_status) parts.push(`防除: ${r.pest_status.slice(0, 20)}`);
+    if (r.work_log) parts.push((r.work_log ?? '').slice(0, 30));
+    if (r.fertilizer) parts.push(`施肥: ${(r.fertilizer ?? '').slice(0, 20)}`);
+    if (r.harvest_amount) parts.push(`収穫: ${(r.harvest_amount ?? '').slice(0, 20)}`);
+    if (r.pest_status) parts.push(`防除: ${(r.pest_status ?? '').slice(0, 20)}`);
     return parts.join(' / ') || '記録あり';
   };
 
@@ -489,7 +489,7 @@ export function HistoryView({
             )}
             {/* ── AI補正バッジ ── */}
             {calSelected.raw_transcript && (() => {
-              const corrections = extractCorrections(calSelected.raw_transcript);
+              const corrections = extractCorrections(calSelected.raw_transcript ?? '');
               if (corrections.length === 0) return null;
               return (
                 <div className="flex flex-wrap gap-1.5 mt-2 mb-3">

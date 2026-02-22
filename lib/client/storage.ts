@@ -3,7 +3,15 @@ import { SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_MOOD, MEDIA_DB, MEDIA_STORE
 import { isValidTemp, isValidHumidity } from '@/lib/logic/validation';
 
 /* ── localStorage ── */
-export function loadRecs(): LocalRecord[] { try { return JSON.parse(localStorage.getItem(SK_RECORDS) || '[]'); } catch { return []; } }
+export function loadRecs(): LocalRecord[] {
+  try {
+    const raw: unknown[] = JSON.parse(localStorage.getItem(SK_RECORDS) || '[]');
+    return raw.filter((r): r is LocalRecord => {
+      try { return r != null && typeof r === 'object' && 'id' in r && 'date' in r; }
+      catch { return false; }
+    });
+  } catch { return []; }
+}
 export function saveRecLS(r: LocalRecord) { const rs = loadRecs(); rs.push(r); localStorage.setItem(SK_RECORDS, JSON.stringify(rs)); }
 export function markSync(id: string) { const rs = loadRecs(); localStorage.setItem(SK_RECORDS, JSON.stringify(rs.map(r => r.id === id ? { ...r, synced: true } : r))); }
 export function getUnsynced() { return loadRecs().filter(r => !r.synced); }

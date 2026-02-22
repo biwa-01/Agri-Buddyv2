@@ -165,6 +165,10 @@ export const GEMINI_PROMPT_SECTIONS = {
 不足項目への言及をreplyに含めない。抽出できたものだけ返せ。
 
 1. house_data (max_temp / min_temp / humidity): 実測値のみ。なければnull。
+   - 複数地点の温度が言及された場合（例:「法事の上は30度、学校の下は22度」）:
+     locationフィールドに対応する地点の温度をhouse_dataに入れる。
+     locationが未確定なら、最初に言及された地点の値を採用する。
+     他の地点の温度はwork_logに「[地点名] 最高XX℃」の形で含める。
 
 2. work_log — 作業内容の完全記述:
    - 作業種別（定植準備、剪定、灌水、薬剤散布等）
