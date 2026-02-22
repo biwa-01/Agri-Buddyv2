@@ -93,7 +93,17 @@ ${OUTPUT_SCHEMA}
       );
     }
     const responseText = result.response.text().replace(/```json|```/g, "").trim();
-    return NextResponse.json(JSON.parse(responseText));
+    const parsed = JSON.parse(responseText);
+
+    // デバッグ: 抽出判定の内訳をログ出力
+    const filled = Object.entries(parsed)
+      .filter(([k, v]) => v != null && v !== '' && !['status','reply','missing_hints','missing_questions','confidence','advice','strategic_advice','admin_log','estimated_revenue'].includes(k))
+      .map(([k]) => k);
+    console.log('[diagnose] filled:', filled.join(', '));
+    console.log('[diagnose] missing_questions:', (parsed.missing_questions || []).join(', '));
+    console.log('[diagnose] confidence:', parsed.confidence);
+
+    return NextResponse.json(parsed);
 
   } catch (error) {
     console.error("Diagnosis Error:", error);

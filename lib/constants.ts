@@ -161,14 +161,26 @@ export const GEMINI_PROMPT_SECTIONS = {
 - 実測値がない場合はnullを返す。推測値やダミーデータは絶対に使用しない。
 - house_data は実測値がある場合のみ返す。ない場合はnullとする。`,
 
-  EXTRACTION_RULES: `【抽出対象項目 — 詳細ルール】
+  EXTRACTION_RULES: `【言及判定 — 最重要】
+ユーザーが少しでもフィールドに関連する発言をしていれば「言及済み」と見なし、
+そのフィールドは抽出済みとしてmissing_questionsから除外せよ。
+- 「肥料はやってない」→ fertilizer="なし"、FERTILIZER除外
+- 「虫はいない」→ pest_status="なし"、PEST除外
+- 「30度くらい」→ house_data.max_temp=30、HOUSE_TEMP除外
+- 曖昧でも言及があれば埋める。完全に未言及の項目のみmissing_questionsに残す。
+
+【抽出対象項目 — 詳細ルール】
 不足項目への言及をreplyに含めない。抽出できたものだけ返せ。
 
 1. house_data (max_temp / min_temp / humidity): 実測値のみ。なければnull。
-   - 複数地点の温度が言及された場合（例:「法事の上は30度、学校の下は22度」）:
-     locationフィールドに対応する地点の温度をhouse_dataに入れる。
-     locationが未確定なら、最初に言及された地点の値を採用する。
-     他の地点の温度はwork_logに「[地点名] 最高XX℃」の形で含める。
+   【複数地点の温度 — 思考プロセス】
+   Step 1: ユーザーの現在locationを確認する
+   Step 2: 入力内の全温度データを地点名と紐付ける
+   Step 3: 現在locationに一致する地点の温度 → house_dataに格納
+   Step 4: 他地点の温度 → work_logに「[地点名] 最高XX℃」形式で追記
+   Step 5: locationが未確定の場合、最初に言及された地点を採用
+   例: location="法事の上"、入力="法事の上30度、学校の下22度"
+   → house_data.max_temp=30、work_log に「学校の下 最高22℃」追記
 
 2. work_log — 作業内容の完全記述:
    - 作業種別（定植準備、剪定、灌水、薬剤散布等）
@@ -219,9 +231,13 @@ export const GEMINI_PROMPT_SECTIONS = {
 不足ではない。missing_questionsに含めないこと。`,
 
   ADMIN_LOG_RULES: `【admin_log生成ルール — 独立セクション】
-【最重要原則】
+【最重要原則 — 原文丸写し厳禁】
 提供された構造化フィールドが唯一の情報源。フィールドにない情報の追加は厳禁。
 全フィールドの値を漏れなく日誌に反映すること。
+
+原文の口語表現（〜したよ、〜掘ってきました、〜やっとった）を100%排除せよ。
+プロ農家の営農日誌として【場所】【作業】【資材】の項目別に体言止めで再構成すること。
+原文の丸写しは不合格とする。必ず農業用語に変換し、構造化して出力せよ。
 
 admin_logは「プロの営農日誌」として出力する。以下を厳守:
 
