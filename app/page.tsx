@@ -22,7 +22,7 @@ import {
 } from '@/lib/constants';
 import { isValidTemp } from '@/lib/logic/validation';
 import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
-import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, buildSlotsFromConfirmItems, parseVoiceCorrection } from '@/lib/logic/extraction';
+import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, buildSlotsFromConfirmItems } from '@/lib/logic/extraction';
 import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
 import { speak, createRecog, invalidateRecogCache, isIOS } from '@/lib/client/speech';
@@ -149,8 +149,6 @@ export default function AgriBuddy() {
   const pendingDataRef = useRef<Record<string, any>>({});
   const advanceFollowUpRef = useRef<() => void>(() => {});
   const emptyRetryRef = useRef(0);
-  // Narrative mode flag (自由語り→動的queue)
-  const narrativeModeRef = useRef(false);
   // Persistent SpeechRecognition refs (iOS Safari mic banner suppression)
   const resultOffsetRef = useRef(0);        // onresultでの読み取り開始位置
   const mutedRef = useRef(false);           // TTS中にtrue→結果無視+オフセット前進
@@ -431,13 +429,19 @@ export default function AgriBuddy() {
 
   /* ── AI admin_log fetch + debounced regeneration ── */
   const adminLogDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const adminLogFetchingRef = useRef(false);
 
   const fetchAdminLogFromAI = useCallback(async (items: ConfirmItem[]): Promise<string | null> => {
     try {
       const res = await fetch('/api/admin-log', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: items.filter(i => i.key !== 'admin_log' && i.key !== 'raw_transcript') }),
+        body: JSON.stringify({
+          items: items.filter(i =>
+            i.key !== 'admin_log' && i.key !== 'raw_transcript'
+            && i.value && i.value.trim() && i.value !== '場所未定'
+          ),
+        }),
       });
       const data = await res.json();
       return data.admin_log || null;
@@ -447,9 +451,14 @@ export default function AgriBuddy() {
   }, []);
 
   const regenerateAdminLogWithAI = useCallback(async (items: ConfirmItem[]) => {
-    const adminLog = await fetchAdminLogFromAI(items);
-    if (adminLog) {
-      setConfirmItems(prev => prev.map(it => it.key === 'admin_log' ? { ...it, value: adminLog } : it));
+    adminLogFetchingRef.current = true;
+    try {
+      const adminLog = await fetchAdminLogFromAI(items);
+      if (adminLog) {
+        setConfirmItems(prev => prev.map(it => it.key === 'admin_log' ? { ...it, value: adminLog } : it));
+      }
+    } finally {
+      adminLogFetchingRef.current = false;
     }
   }, [fetchAdminLogFromAI]);
 
@@ -460,7 +469,8 @@ export default function AgriBuddy() {
     invalidateRecogCache();
     clr();
     window.speechSynthesis?.cancel();
-    const hadPendingRegen = !!adminLogDebounceRef.current;
+    // debounce待機中 OR fetch in-flight中のいずれかで待機
+    const needsAdminLogSync = !!adminLogDebounceRef.current || adminLogFetchingRef.current;
     if (adminLogDebounceRef.current) { clearTimeout(adminLogDebounceRef.current); adminLogDebounceRef.current = null; }
     const d = pendingDataRef.current;
 
@@ -514,9 +524,9 @@ export default function AgriBuddy() {
     const adviceText = d.advice || generateAdvice(slots, conf);
     const strategicText = d.strategic_advice || generateStrategicAdvice(slots);
 
-    // admin_log同期保証: debounce中なら同期的にGemini版を取得
+    // admin_log同期保証: debounce待機中 or fetch中なら同期的にGemini版を取得
     let adminText: string;
-    if (hadPendingRegen) {
+    if (needsAdminLogSync) {
       setSaving(true);
       const aiLog = await fetchAdminLogFromAI(confirmItems);
       adminText = aiLog
@@ -674,7 +684,6 @@ export default function AgriBuddy() {
 
   /* ── Voice Correction on CONFIRM ── */
   const handleVoiceCorrection = useCallback(async (text: string) => {
-    // Gemini APIで修正を解析、失敗時はローカルregexフォールバック
     try {
       setCorrectionTranscript('修正を解析中...');
       const res = await fetch('/api/voice-correct', {
@@ -689,19 +698,13 @@ export default function AgriBuddy() {
         speak('修正しました。');
         return;
       }
+      // Gemini成功だが修正候補なし
+      setCorrectionTranscript('');
+      speak('どの項目を変更するか分かりませんでした。もう一度お試しください。');
     } catch {
-      // Gemini失敗 → ローカルフォールバック
+      setCorrectionTranscript('');
+      speak('修正の解析に失敗しました。直接タップして編集してください。');
     }
-
-    // ローカルregexフォールバック
-    const corrections = parseVoiceCorrection(text);
-    setCorrectionTranscript('');
-    if (corrections.length === 0) {
-      speak('どの項目を変更するか分かりませんでした。');
-      return;
-    }
-    for (const c of corrections) updateConfirmItem(c.key, c.value);
-    speak('修正しました。');
   }, [updateConfirmItem, confirmItems]);
 
   const startVoiceCorrection = useCallback(() => {
@@ -942,11 +945,8 @@ export default function AgriBuddy() {
           mutedRef.current = true;
         }
       }
-      // 挨拶 + 最初の質問を1発話で（iOSジェスチャーコンテキスト内で発話 = audio unlock）
-      const greeting = narrativeModeRef.current
-        ? 'あと少しだけ確認させてください。'
-        : 'お疲れ様です！記録、手伝いますね。';
-      const ttsP = speak(greeting + question);
+      // 最初の質問（ナラティブ「今日のこと〜」直後なので挨拶不要）
+      const ttsP = speak(question);
       if (step !== 'PHOTO') {
         if (!isIOS) setTimeout(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); }, 100);
         ttsP.then(() => {
@@ -1197,7 +1197,7 @@ export default function AgriBuddy() {
         showConfirmScreen();
       }
     } catch {
-      setAiReply('オフラインです。ローカル保存しました。'); setPhase('IDLE');
+      setAiReply('通信に失敗しました。ネットワークを確認して、もう一度話しかけてください。'); setPhase('IDLE');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [partial, clr, syncRecs, photoCount, showConfirmScreen, startListen]);
@@ -1242,52 +1242,9 @@ export default function AgriBuddy() {
     showConfirmScreen();
   }, [clr, showConfirmScreen]);
 
-  /* ── Start Interview (question-first flow) ── */
-  const startInterview = useCallback(() => {
-    // 前回セッションの完全クリーンアップ
-    // 挨拶はadvanceFollowUpの最初の質問に統合（speak→cancel→speakのChrome bugを回避）
-    persistentRecogRef.current = false; mutedRef.current = false; resultOffsetRef.current = 0;
-    const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
-    clr();
-
-    // Ref状態リセット
-    rawTranscriptRef.current = [];
-    chunksRef.current = '';
-    sosDetectedRef.current = false;
-    tier2DetectedRef.current = null;
-    normalEmotionRef.current = null;
-    photoWaitingRef.current = false;
-    emptyRetryRef.current = 0;
-    pendingDataRef.current = {};
-
-    // React状態リセット
-    setTranscript(''); setAiReply(''); setPartial({}); setConv([]); setProfitPreview(null);
-    setPhotoCount(0); setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
-    setBump(null); setConfidence(null); setConfirmItems([]); setFollowUpInfo(null);
-
-    // Mentor状態リセット
-    setMentorDraft(''); setMentorCopied(false); setMentorStep('comfort'); setConsultSheet('');
-
-    // メディアプレビューのURL revoke
-    mediaPreview.forEach(m => URL.revokeObjectURL(m.url));
-    setMediaPreview([]);
-
-    // 前回セッション破棄
-    localStorage.removeItem(SK_SESSION);
-
-    narrativeModeRef.current = false;
-    const queue: FollowUpStep[] = ['WORK','HOUSE_TEMP','FERTILIZER','PEST','HARVEST','COST','DURATION','PHOTO'];
-    followUpActiveRef.current = true;
-    followUpIndexRef.current = 0;
-    followUpQueueRef.current = queue;
-    isFirstQuestionRef.current = true;
-    advanceFollowUpRef.current();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clr]);
-
   /* ── Start Narrative (free-talk → dynamic follow-up) ── */
   const startNarrative = useCallback(() => {
-    // 前回セッションの完全クリーンアップ（startInterviewと同一）
+    // 前回セッションの完全クリーンアップ
     persistentRecogRef.current = false; mutedRef.current = false; resultOffsetRef.current = 0;
     const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
     clr();
@@ -1309,7 +1266,6 @@ export default function AgriBuddy() {
 
     // ナラティブモード: queueプリビルドしない
     followUpActiveRef.current = false;
-    narrativeModeRef.current = true;
     speak('今日のこと、なんでも聞かせてください。').then(() => startListen());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clr, startListen]);
@@ -1781,10 +1737,6 @@ export default function AgriBuddy() {
                     マイクをタップして、今日の作業を自由に話してください<br/>
                     <span className="text-white/30">不足分だけあとで質問します</span>
                   </p>
-                  <button onClick={startInterview}
-                    className={`mt-4 py-3 px-6 rounded-2xl ${CARD_FLAT} flex items-center justify-center gap-2 text-base font-bold text-stone-500 hover:bg-white/80 btn-press`}>
-                    質問モードで記録
-                  </button>
                   {!isFirstTime && (
                     <button onClick={() => ocrInputRef.current?.click()}
                       className={`mt-3 py-3 px-6 rounded-2xl ${CARD_FLAT} flex items-center justify-center gap-2 text-lg font-bold text-stone-700 hover:bg-white/80 btn-press`}>

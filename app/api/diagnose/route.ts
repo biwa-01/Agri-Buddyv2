@@ -3,8 +3,6 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 import type { ConvMessage, PartialSlots, OutdoorWeather } from '@/lib/types';
 import { SOS_RE, GEMINI_PROMPT_SECTIONS } from '@/lib/constants';
-import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
-import { correctForLog } from '@/lib/logic/extraction';
 
 export async function POST(req: NextRequest) {
   try {
@@ -77,49 +75,34 @@ ${contextStr}
 ${OUTPUT_SCHEMA}
 `;
 
+    // 30秒タイムアウト + 1回リトライ
+    const callGemini = async () => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 30_000);
+      try {
+        const result = await model.generateContent(prompt, { signal: ctrl.signal });
+        return result;
+      } finally { clearTimeout(timer); }
+    };
+
+    let result;
     try {
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.text().replace(/```json|```/g, "").trim();
-      return NextResponse.json(JSON.parse(responseText));
-    } catch (geminiError) {
-      // ─── Gemini失敗時フォールバック: ローカル関数で最低限の応答 ───
-      console.error("Gemini API Error (fallback to local):", geminiError);
-
-      const allText = correctForLog([
-        ...(context || []).map(m => m.text),
-        text || '',
-      ].join(' '));
-
-      const slots: PartialSlots = { ...(partial || {}) };
-
-      // 最低限の抽出: 作業内容
-      if (!slots.work_log && allText.trim().length > 2) {
-        slots.work_log = allText.trim().slice(0, 80);
+      result = await callGemini();
+    } catch (firstErr) {
+      console.warn('Gemini 1st attempt failed, retrying...', firstErr);
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        result = await callGemini();
+      } catch (retryErr) {
+        console.error('Gemini retry failed:', retryErr);
+        return NextResponse.json(
+          { error: '解析に失敗しました。もう一度、短めに話してみてください。' },
+          { status: 502 }
+        );
       }
-
-      const loc = location || '';
-      const confidence = calcConfidence(slots);
-      const adviceText = generateAdvice(slots, confidence);
-      const strategicAdvice = generateStrategicAdvice(slots);
-      const adminLogLines = generateAdminLog(slots, loc);
-
-      return NextResponse.json({
-        status: 'complete',
-        reply: 'AI解析に一時的に接続できませんでした。ローカル処理で記録します。',
-        confidence,
-        work_log: slots.work_log || '',
-        plant_status: slots.plant_status || '良好',
-        advice: adviceText,
-        strategic_advice: strategicAdvice,
-        admin_log: adminLogLines,
-        fertilizer: slots.fertilizer || undefined,
-        pest_status: slots.pest_status || undefined,
-        harvest_amount: slots.harvest_amount || undefined,
-        material_cost: slots.material_cost || undefined,
-        work_duration: slots.work_duration || undefined,
-        fuel_cost: slots.fuel_cost || undefined,
-      });
     }
+    const responseText = result.response.text().replace(/```json|```/g, "").trim();
+    return NextResponse.json(JSON.parse(responseText));
 
   } catch (error) {
     console.error("Diagnosis Error:", error);
