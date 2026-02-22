@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ error: 'GOOGLE_GEMINI_API_KEY未設定' }, { status: 500 });
     }

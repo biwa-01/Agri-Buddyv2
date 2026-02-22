@@ -23,6 +23,7 @@ export interface ApiResponse {
   work_duration?: string; fuel_cost?: string;
   estimated_revenue?: number;
   error?: string;
+  details?: unknown;
   mentor_mode?: boolean;
 }
 

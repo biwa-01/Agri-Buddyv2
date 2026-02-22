@@ -24,11 +24,12 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Gemini API ───
-    if (!process.env.GOOGLE_GEMINI_API_KEY) {
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    if (!apiKey) {
       return NextResponse.json({ error: "APIキーが未設定です" }, { status: 500 });
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY);
+    const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const contextStr = (context || [])
@@ -75,6 +76,9 @@ ${contextStr}
 ${OUTPUT_SCHEMA}
 `;
 
+    console.log('[diagnose] env:', { GEMINI: !!process.env.GOOGLE_GEMINI_API_KEY, GENERATIVE: !!process.env.GOOGLE_GENERATIVE_AI_API_KEY });
+    console.log('[diagnose] prompt:', prompt.length, 'chars');
+
     // 30秒タイムアウト + 1回リトライ
     const callGemini = async () => {
       const ctrl = new AbortController();
@@ -89,14 +93,16 @@ ${OUTPUT_SCHEMA}
     try {
       result = await callGemini();
     } catch (firstErr) {
-      console.warn('Gemini 1st attempt failed, retrying...', firstErr);
+      const e1 = firstErr instanceof Error ? { name: firstErr.name, message: firstErr.message } : String(firstErr);
+      console.error('[diagnose] 1st fail:', JSON.stringify(e1));
       await new Promise(r => setTimeout(r, 2000));
       try {
         result = await callGemini();
       } catch (retryErr) {
-        console.error('Gemini retry failed:', retryErr);
+        const e2 = retryErr instanceof Error ? { name: retryErr.name, message: retryErr.message } : String(retryErr);
+        console.error('[diagnose] retry fail:', JSON.stringify(e2));
         return NextResponse.json(
-          { error: '解析に失敗しました。もう一度、短めに話してみてください。' },
+          { error: '解析に失敗しました。もう一度、短めに話してみてください。', details: e2 },
           { status: 502 }
         );
       }

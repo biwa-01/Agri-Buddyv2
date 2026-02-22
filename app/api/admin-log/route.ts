@@ -8,11 +8,12 @@ export async function POST(req: NextRequest) {
       items: { key: string; label: string; value: string }[];
     };
 
-    if (!process.env.GOOGLE_GEMINI_API_KEY) {
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    if (!apiKey) {
       return NextResponse.json({ error: 'APIキー未設定' }, { status: 500 });
     }
 
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GEMINI_API_KEY);
+    const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 
     const fieldsStr = items

@@ -1136,7 +1136,12 @@ export default function AgriBuddy() {
         body: JSON.stringify({ text, context: uc, partial, location: locOvr || locRef.current, outdoor }),
       });
       const d: ApiResponse = await res.json();
-      if (d.error) { setAiReply(d.error); setPhase('IDLE'); return; }
+      if (d.error) {
+        const msg = d.details
+          ? `${d.error}\n[${typeof d.details === 'string' ? d.details : JSON.stringify(d.details)}]`
+          : d.error;
+        setAiReply(msg); setPhase('IDLE'); return;
+      }
 
       if (d.mentor_mode) {
         setPhase('MENTOR');
