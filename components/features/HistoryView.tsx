@@ -511,7 +511,7 @@ export function HistoryView({
               </div>
             )}
             <div className="space-y-3 text-2xl">
-              {calSelected.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {calSelected.work_log}</span></div>}
+              {!calSelected.admin_log && calSelected.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {calSelected.work_log}</span></div>}
               {calSelected.work_duration && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">時間:</b> {calSelected.work_duration}</span></div>}
               {calSelected.fertilizer && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">施肥:</b> {calSelected.fertilizer}</span></div>}
               {calSelected.pest_status && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">病害虫:</b> {calSelected.pest_status}</span></div>}
@@ -598,17 +598,7 @@ export function HistoryView({
                 ) : null}
               </>);
             })()}
-            {/* ── raw_transcript: 最下部に降格 ── */}
-            {calSelected.raw_transcript && (
-              <details className="mt-3">
-                <summary className="text-sm font-bold text-stone-500 cursor-pointer flex items-center gap-1.5">
-                  <Mic className="w-4 h-4" />音声入力（原文）を表示
-                </summary>
-                <div className="mt-2 p-4 rounded-xl bg-white border-2 border-stone-300">
-                  <pre className="text-xl font-bold text-stone-800 whitespace-pre-wrap leading-relaxed font-sans">{calSelected.raw_transcript}</pre>
-                </div>
-              </details>
-            )}
+            {/* raw_transcript: UIから除外（localStorageには保持、AI補正バッジで活用） */}
           </div>
         </section>
         <section className="mx-5 mb-4">

@@ -11,17 +11,14 @@ interface ConfirmScreenProps {
   onUpdate: (key: string, val: string) => void;
   onSave: () => void;
   onReset: () => void;
-  onReExtract?: (text: string) => void;
-  reExtracting?: boolean;
   onVoiceCorrection?: () => void;
   isListeningCorrection?: boolean;
   correctionTranscript?: string;
   saving?: boolean;
 }
 
-export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onReExtract, reExtracting, onVoiceCorrection, isListeningCorrection, correctionTranscript, saving }: ConfirmScreenProps) {
+export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onVoiceCorrection, isListeningCorrection, correctionTranscript, saving }: ConfirmScreenProps) {
   // Split items into sections
-  const rawItem = confirmItems.find(it => it.key === 'raw_transcript');
   const adminItem = confirmItems.find(it => it.key === 'admin_log');
   const locationItem = confirmItems.find(it => it.key === 'location');
   const slotItems = confirmItems.filter(it => it.key !== 'raw_transcript' && it.key !== 'admin_log' && it.key !== 'location');
@@ -44,21 +41,6 @@ export function ConfirmScreen({ confirmItems, onUpdate, onSave, onReset, onReExt
         <h2 className="font-display text-2xl tracking-[0.3em] text-stone-900 font-bold mb-2">営 農 日 誌</h2>
         <p className="text-base font-medium text-stone-500 mb-4">タップで修正できます。問題なければ「保存」を押してください。</p>
         <div>
-          {/* Section: あなたの音声 — 暖色・太字・サンセリフ (空なら非表示) */}
-          {rawItem && rawItem.value && rawItem.value.trim() !== '' && (
-            <div className="mb-3 p-3 rounded-xl bg-amber-50 border-2 border-amber-300">
-              <p className="text-xs font-black text-amber-700 tracking-wide mb-1 flex items-center gap-1">
-                <Mic className="w-3.5 h-3.5" />あなたの音声
-              </p>
-              <div className="font-sans font-bold">
-                <ConfirmField item={rawItem} onUpdate={onUpdate} onReExtract={onReExtract} />
-              </div>
-              {reExtracting && (
-                <p className="text-sm font-bold text-amber-600 mt-1 animate-pulse">再解析中...</p>
-              )}
-            </div>
-          )}
-
           {/* Section: 場所選択 — select + カスタム入力 */}
           {locationItem && (
             <div className="mb-3 p-3 rounded-xl bg-white border border-stone-200">

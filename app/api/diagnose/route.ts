@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGeminiModel, callWithRetry } from '@/lib/gemini';
 
-import type { ConvMessage, PartialSlots, OutdoorWeather } from '@/lib/types';
+import type { ConvMessage, OutdoorWeather } from '@/lib/types';
 import { SOS_RE, GEMINI_PROMPT_SECTIONS } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, context, partial, location, outdoor } = await req.json() as {
+    const { text, context, location, outdoor } = await req.json() as {
       text: string;
       context: ConvMessage[];
-      partial?: PartialSlots;
       location?: string;
       outdoor?: OutdoorWeather | null;
     };
@@ -30,9 +29,7 @@ export async function POST(req: NextRequest) {
       .map(m => `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${m.text}`)
       .join('\n');
 
-    const partialStr = partial ? JSON.stringify(partial) : '{}';
-
-    const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, MISSING_QUESTIONS_RULES, ADMIN_LOG_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
+    const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
 
     const weatherSection = outdoor
       ? `\n【本日の天気】${outdoor.description} ${outdoor.temperature}℃\n`
@@ -50,12 +47,6 @@ ${SILENT_COMPLETION_RULES}
 ${VALIDATION_RULES}
 
 ${EXTRACTION_RULES}
-
-${MISSING_QUESTIONS_RULES}
-
-${ADMIN_LOG_RULES}
-
-前回までの抽出結果: ${partialStr}
 
 ${ADVICE_RULES}
 

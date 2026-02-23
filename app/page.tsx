@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 
 import type {
-  ConvMessage, HouseData, PartialSlots, ApiResponse,
+  ConvMessage, HouseData, ApiResponse,
   Phase, View, OutdoorWeather, LocalRecord, LastSession,
   FollowUpStep, ConfirmItem, EmotionAnalysis,
 } from '@/lib/types';
@@ -56,7 +56,6 @@ export default function AgriBuddy() {
   const [todayHouse, setTodayHouse] = useState<HouseData | null>(null);
   const [todayAdvice, setTodayAdvice] = useState('');
   const [todayLog, setTodayLog] = useState('');
-  const [partial, setPartial] = useState<PartialSlots>({});
   const [bump, setBump] = useState<string[] | null>(null);
   const [confidence, setConfidence] = useState<'low' | 'medium' | 'high' | null>(null);
   const [isOnline, setIsOnline] = useState(true);
@@ -85,8 +84,6 @@ export default function AgriBuddy() {
   // Confirm screen state
   const [confirmItems, setConfirmItems] = useState<ConfirmItem[]>([]);
 
-  // Re-extraction loading
-  const [reExtracting, setReExtracting] = useState(false);
   // Save-time Gemini wait
   const [saving, setSaving] = useState(false);
 
@@ -291,9 +288,6 @@ export default function AgriBuddy() {
     const d = pendingDataRef.current;
     const items: ConfirmItem[] = [];
 
-    // 先頭: 音声入力(原文)
-    if (d.raw_transcript) items.push({ key: 'raw_transcript', label: '音声入力', value: d.raw_transcript });
-
     // 場所（常に表示、空なら「場所未定」）
     const loc = locRef.current;
     items.push({ key: 'location', label: '場所', value: loc || '場所未定' });
@@ -379,7 +373,7 @@ export default function AgriBuddy() {
     followUpIndexRef.current = 0;
     followUpQueueRef.current = [];
     setFollowUpInfo(null);
-    setConv([]); setTranscript(''); setPartial({});
+    setConv([]); setTranscript('');
 
     setOcrLoading(true);
     setPhase('THINKING');
@@ -461,6 +455,14 @@ export default function AgriBuddy() {
       adminLogFetchingRef.current = false;
     }
   }, [fetchAdminLogFromAI]);
+
+  // CONFIRM進入時にGemini admin_log自動生成（編集なしでもGemini版を保証）
+  useEffect(() => {
+    if (phase === 'CONFIRM' && confirmItems.length > 0 && !adminLogFetchingRef.current) {
+      regenerateAdminLogWithAI(confirmItems);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   /* ── Save from Confirm Screen ── */
   const saveFromConfirm = useCallback(async () => {
@@ -568,7 +570,6 @@ export default function AgriBuddy() {
     photoWaitingRef.current = false;
     rawTranscriptRef.current = [];
     setFollowUpInfo(null);
-    setPartial({});
     setBump(null);
     setConfidence(null);
 
@@ -657,30 +658,6 @@ export default function AgriBuddy() {
       return withLocalLog;
     });
   }, [regenerateAdminLogWithAI]);
-
-  /* ── Re-extract from edited raw_transcript ── */
-  const reExtractFromRaw = useCallback(async (newRawText: string) => {
-    setReExtracting(true);
-    try {
-      const res = await fetch('/api/diagnose', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: newRawText, context: [], location: locRef.current, outdoor }),
-      });
-      const d: ApiResponse = await res.json();
-      if (!d.error) {
-        // pendingDataRefを上書き（raw_transcriptは保持）
-        const rawKeep = newRawText;
-        pendingDataRef.current = { ...d, raw_transcript: rawKeep };
-        delete pendingDataRef.current.admin_log; // buildConfirmItemsで再生成
-        const items = buildConfirmItems();
-        setConfirmItems(items);
-      }
-    } catch {
-      // API失敗時は何もしない（現在の値を維持）
-    }
-    setReExtracting(false);
-  }, [buildConfirmItems]);
 
   /* ── Voice Correction on CONFIRM ── */
   const handleVoiceCorrection = useCallback(async (text: string) => {
@@ -1133,7 +1110,7 @@ export default function AgriBuddy() {
     try {
       const res = await fetch('/api/diagnose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, context: uc, partial, location: locOvr || locRef.current, outdoor }),
+        body: JSON.stringify({ text, context: uc, location: locOvr || locRef.current, outdoor }),
       });
       const d: ApiResponse = await res.json();
       if (d.error) { setAiReply(d.error); setPhase('IDLE'); return; }
@@ -1151,7 +1128,7 @@ export default function AgriBuddy() {
       }
 
       setConv(p => [...p, { role: 'assistant', text: d.reply }]);
-      setAiReply(d.reply); setPartial({});
+      setAiReply(d.reply);
       if (d.house_data) setTodayHouse(d.house_data);
       if (d.advice) setTodayAdvice(d.advice);
       if (d.admin_log) setTodayLog(d.admin_log);
@@ -1200,7 +1177,7 @@ export default function AgriBuddy() {
       setAiReply('通信に失敗しました。ネットワークを確認して、もう一度話しかけてください。'); setPhase('IDLE');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [partial, clr, syncRecs, photoCount, showConfirmScreen, startListen]);
+  }, [clr, syncRecs, photoCount, showConfirmScreen, startListen]);
 
   useEffect(() => { sasRef.current = stopAndSend; }, [stopAndSend]);
 
@@ -1256,7 +1233,7 @@ export default function AgriBuddy() {
     photoWaitingRef.current = false;
     emptyRetryRef.current = 0;
     pendingDataRef.current = {};
-    setTranscript(''); setAiReply(''); setPartial({}); setConv([]); setProfitPreview(null);
+    setTranscript(''); setAiReply(''); setConv([]); setProfitPreview(null);
     setPhotoCount(0); setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
     setBump(null); setConfidence(null); setConfirmItems([]); setFollowUpInfo(null);
     setMentorDraft(''); setMentorCopied(false); setMentorStep('comfort'); setConsultSheet('');
@@ -1303,7 +1280,7 @@ export default function AgriBuddy() {
     setMediaPreview([]);
     setPhase('IDLE'); setConv([]); setTranscript(''); setAiReply('');
     setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
-    setPartial({}); setBump(null); setConfidence(null); setPhotoCount(0);
+    setBump(null); setConfidence(null); setPhotoCount(0);
     setView('record');
   };
 
@@ -1419,7 +1396,6 @@ export default function AgriBuddy() {
             <ConfirmScreen
               confirmItems={confirmItems} onUpdate={updateConfirmItem}
               onSave={saveFromConfirm} onReset={reset}
-              onReExtract={reExtractFromRaw} reExtracting={reExtracting}
               onVoiceCorrection={startVoiceCorrection}
               isListeningCorrection={correctionListening}
               correctionTranscript={correctionTranscript}

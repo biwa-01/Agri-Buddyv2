@@ -180,45 +180,25 @@ export function generateStrategicAdvice(slots: PartialSlots): string {
 }
 
 export function generateAdminLog(slots: PartialSlots, loc: string): string {
-  const date = new Date().toISOString().split('T')[0];
   const lines: string[] = [];
 
-  // 冒頭: 日付 + 場所
-  lines.push(`${date}${loc ? ` ${loc}の記録。` : 'の記録。'}`);
+  if (loc) lines.push(`■${loc}`);
 
-  // 作業内容
-  if (slots.work_log) lines.push(`${slots.work_log}。`);
+  if (slots.work_log) lines.push(`・作業: ${slots.work_log}`);
 
-  // ハウス環境
   const envParts: string[] = [];
-  if (slots.max_temp !== undefined) envParts.push(`最高気温${slots.max_temp}℃`);
-  if (slots.min_temp !== undefined) envParts.push(`最低気温${slots.min_temp}℃`);
+  if (slots.max_temp !== undefined) envParts.push(`最高${slots.max_temp}℃`);
+  if (slots.min_temp !== undefined) envParts.push(`最低${slots.min_temp}℃`);
   if (slots.humidity !== undefined) envParts.push(`湿度${slots.humidity}%`);
-  if (envParts.length > 0) lines.push(`ハウス環境: ${envParts.join('、')}。`);
+  if (envParts.length > 0) lines.push(`・環境: ${envParts.join(' / ')}`);
 
-  // 作業時間
-  if (slots.work_duration) lines.push(`作業時間${slots.work_duration}。`);
-
-  // 施肥
-  if (slots.fertilizer && !isNegativeInput(slots.fertilizer)) lines.push(`施肥: ${slots.fertilizer}。`);
-
-  // 収穫
-  if (slots.harvest_amount && !isNegativeInput(slots.harvest_amount)) lines.push(`収穫: ${slots.harvest_amount}。`);
-
-  // 資材費・燃料費
-  if (slots.material_cost) lines.push(`資材費${slots.material_cost}。`);
-  if (slots.fuel_cost) lines.push(`燃料費${slots.fuel_cost}。`);
-
-  // 病害虫
-  if (slots.pest_status && !isNegativeInput(slots.pest_status)) {
-    lines.push(`病害虫: ${slots.pest_status}。`);
-  } else {
-    lines.push('病害虫の発生なし。');
-  }
-
-  // 所見
-  const status = slots.plant_status || '良好';
-  lines.push(status === '良好' ? '生育良好。' : `所見: ${status}。`);
+  if (slots.work_duration) lines.push(`・作業時間: ${slots.work_duration}`);
+  if (slots.fertilizer && !isNegativeInput(slots.fertilizer)) lines.push(`・資材: ${slots.fertilizer}`);
+  if (slots.harvest_amount && !isNegativeInput(slots.harvest_amount)) lines.push(`・収穫: ${slots.harvest_amount}`);
+  if (slots.material_cost) lines.push(`・資材費: ${slots.material_cost}`);
+  if (slots.fuel_cost) lines.push(`・燃料費: ${slots.fuel_cost}`);
+  if (slots.pest_status && !isNegativeInput(slots.pest_status)) lines.push(`・特記: ${slots.pest_status}`);
+  if (slots.plant_status && slots.plant_status !== '良好') lines.push(`・所見: ${slots.plant_status}`);
 
   return lines.join('\n');
 }

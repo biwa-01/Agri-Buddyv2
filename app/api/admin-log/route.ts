@@ -24,16 +24,15 @@ export async function POST(req: NextRequest) {
 
 ${GEMINI_PROMPT_SECTIONS.ADMIN_LOG_RULES}
 
-${GEMINI_PROMPT_SECTIONS.DATA_CLEANING_RULES}
-
 【具体例】
 入力:
   場所: 学校の下の畑
   作業内容: シャインマスカット定植用の穴掘り。直径1m×深さ30cm、9穴、間隔8m
   肥料: 堆肥 約10kg/穴（局所施肥）。石灰 全面散布。BMようりん 2袋
+  最高気温: 28℃
 
 出力:
-{ "admin_log": "学校の下の畑。シャインマスカット定植準備。植穴掘り 直径1m×深さ30cm 9穴 間隔8m。堆肥 約10kg/穴 局所施肥。石灰 全面散布。BMようりん 2袋施用。" }
+{ "admin_log": "■学校の下の畑\\n・作業: シャインマスカット定植穴掘り 直径1m×深さ30cm 9穴 間隔8m\\n・資材: 堆肥 約10kg/穴 局所施肥、石灰 全面散布、BMようりん 2袋\\n・環境: 最高28℃" }
 
 【自己検閲 — 出力前に必ず実行】
 生成したadmin_logが以下を満たすか検証し、満たさない場合は修正してから出力:
