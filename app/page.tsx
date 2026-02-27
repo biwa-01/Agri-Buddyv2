@@ -22,7 +22,7 @@ import {
 } from '@/lib/constants';
 import { isValidTemp } from '@/lib/logic/validation';
 import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
-import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, buildSlotsFromConfirmItems } from '@/lib/logic/extraction';
+import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, buildSlotsFromConfirmItems, normalizeLocationName } from '@/lib/logic/extraction';
 import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
 import { speak, createRecog, invalidateRecogCache, isIOS } from '@/lib/client/speech';
@@ -31,6 +31,7 @@ import {
   loadSession, saveSession, sanitizeRecords, deepClean,
   saveMediaBlob, loadMediaForRecord, updateMediaRecordId,
   getCalDays, saveMoodEntry,
+  migrateLocations, addLocation, getLocationNames, findLocationByName,
 } from '@/lib/client/storage';
 import { analyzeEmotion } from '@/lib/logic/empathy';
 import { pickNudge } from '@/lib/logic/empathyResponses';
@@ -63,6 +64,10 @@ export default function AgriBuddy() {
   const [lastSess, setLastSess] = useState<LastSession | null>(null);
   const [curLoc, setCurLoc] = useState('');
   const [photoCount, setPhotoCount] = useState(0);
+
+  // Dynamic location master
+  const [locationOptions, setLocationOptions] = useState<string[]>([]);
+  const [isNewLocation, setIsNewLocation] = useState(false);
 
   // HTTPS誘導
   const [httpsRedirectUrl, setHttpsRedirectUrl] = useState<string | null>(null);
@@ -249,6 +254,8 @@ export default function AgriBuddy() {
     setMounted(true);
     sanitizeRecords();
     deepClean();
+    migrateLocations();
+    setLocationOptions(getLocationNames());
     fetchWeather().then(setOutdoor);
     setIsOnline(navigator.onLine);
     setPendSync(getUnsynced().length);
@@ -289,7 +296,7 @@ export default function AgriBuddy() {
     const items: ConfirmItem[] = [];
 
     // 場所（常に表示、空なら「場所未定」）
-    const loc = locRef.current;
+    const loc = normalizeLocationName(locRef.current) || locRef.current;
     items.push({ key: 'location', label: '場所', value: loc || '場所未定' });
 
     if (d.ocr_date) items.push({ key: 'ocr_date', label: '日付', value: d.ocr_date });
@@ -514,7 +521,15 @@ export default function AgriBuddy() {
         case 'ocr_date': d.ocr_date = raw; break;
         case 'raw_transcript': d.raw_transcript = raw; break;
         case 'admin_log': d.admin_log = raw; break;
-        case 'location': setCurLoc(raw); break;
+        case 'location': {
+          const normalized = normalizeLocationName(raw) || raw;
+          setCurLoc(normalized);
+          if (normalized && normalized !== '場所未定') {
+            addLocation(normalized, raw !== normalized ? raw : undefined);
+            setLocationOptions(getLocationNames());
+          }
+          break;
+        }
       }
     }
 
@@ -540,6 +555,7 @@ export default function AgriBuddy() {
       adminText = confirmAdminLog || d.admin_log || generateAdminLog(slots, loc);
     }
 
+    const locMaster = findLocationByName(loc);
     const rec: LocalRecord = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       date: pendingDataRef.current.ocr_date || new Date().toISOString().split('T')[0], location: loc,
@@ -551,6 +567,7 @@ export default function AgriBuddy() {
       fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
       photo_count: photoCount, estimated_profit: profit.total,
       raw_transcript: d.raw_transcript || undefined,
+      location_id: locMaster?.id,
       synced: false, timestamp: Date.now(),
     };
     saveRecLS(rec); setPendSync(p => p + 1);
@@ -559,6 +576,7 @@ export default function AgriBuddy() {
     setHistVer(v => v + 1);
     setPhotoCount(0);
     setConfirmItems([]);
+    setIsNewLocation(false);
     mediaPreview.forEach(m => URL.revokeObjectURL(m.url));
     setMediaPreview([]);
 
@@ -1100,7 +1118,8 @@ export default function AgriBuddy() {
     if (emotion.tier >= 2) tier2DetectedRef.current = emotion;
     normalEmotionRef.current = emotion;
 
-    const locOvr = detectLocationOverride(text, locRef.current);
+    const rawLocOvr = detectLocationOverride(text, locRef.current);
+    const locOvr = rawLocOvr ? normalizeLocationName(rawLocOvr) : null;
     if (locOvr) setCurLoc(locOvr);
 
     const msg: ConvMessage = { role: 'user', text };
@@ -1110,7 +1129,7 @@ export default function AgriBuddy() {
     try {
       const res = await fetch('/api/diagnose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, context: uc, location: locOvr || locRef.current, outdoor }),
+        body: JSON.stringify({ text, context: uc, location: locOvr || locRef.current, outdoor, knownLocations: getLocationNames() }),
       });
       const d: ApiResponse = await res.json();
       if (d.error) { setAiReply(d.error); setPhase('IDLE'); return; }
@@ -1133,6 +1152,17 @@ export default function AgriBuddy() {
       if (d.advice) setTodayAdvice(d.advice);
       if (d.admin_log) setTodayLog(d.admin_log);
       if (d.confidence) setConfidence(d.confidence);
+
+      // 新場所検出 → マスタに追加
+      if (d.new_location) {
+        const normalized = normalizeLocationName(d.new_location);
+        if (normalized) {
+          addLocation(normalized, d.new_location);
+          setLocationOptions(getLocationNames());
+          setIsNewLocation(true);
+          setCurLoc(normalized);
+        }
+      }
 
       await speak(d.reply);
 
@@ -1400,6 +1430,8 @@ export default function AgriBuddy() {
               isListeningCorrection={correctionListening}
               correctionTranscript={correctionTranscript}
               saving={saving}
+              locationOptions={locationOptions}
+              isNewLocation={isNewLocation}
             />
           )}
 

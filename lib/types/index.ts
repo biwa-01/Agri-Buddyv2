@@ -1,6 +1,13 @@
 export interface ConvMessage { role: 'user' | 'assistant'; text: string; }
 export interface HouseData { max_temp: number | null; min_temp: number | null; humidity: number | null; }
 
+export interface LocationMaster {
+  id: string;
+  name: string;
+  aliases: string[];
+  createdAt: number;
+}
+
 export interface PartialSlots {
   max_temp?: number; min_temp?: number; humidity?: number;
   work_log?: string; plant_status?: string;
@@ -22,6 +29,7 @@ export interface ApiResponse {
   harvest_amount?: string; material_cost?: string;
   work_duration?: string; fuel_cost?: string;
   estimated_revenue?: number;
+  new_location?: string;
   error?: string;
   mentor_mode?: boolean;
 }
@@ -39,6 +47,7 @@ export interface LocalRecord {
   work_duration: string; fuel_cost: string;
   strategic_advice: string; photo_count: number;
   estimated_profit?: number; raw_transcript?: string;
+  location_id?: string;
   synced: boolean; timestamp: number;
 }
 

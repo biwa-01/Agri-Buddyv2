@@ -6,11 +6,12 @@ import { SOS_RE, GEMINI_PROMPT_SECTIONS } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, context, location, outdoor } = await req.json() as {
+    const { text, context, location, outdoor, knownLocations } = await req.json() as {
       text: string;
       context: ConvMessage[];
       location?: string;
       outdoor?: OutdoorWeather | null;
+      knownLocations?: string[];
     };
 
     // ─── SOS Detection (server-side double check) ───
@@ -35,6 +36,15 @@ export async function POST(req: NextRequest) {
       ? `\n【本日の天気】${outdoor.description} ${outdoor.temperature}℃\n`
       : '';
 
+    const locationSection = location
+      ? `\n【現在の記録場所】${location}\n`
+      : '';
+
+    const locList = (knownLocations && knownLocations.length > 0)
+      ? knownLocations.join(', ')
+      : 'なし（初回利用）';
+    const extractionWithLocs = EXTRACTION_RULES.replace('{locationList}', locList);
+
     const prompt = `
 ${SYSTEM_ROLE}
 
@@ -46,12 +56,12 @@ ${SILENT_COMPLETION_RULES}
 
 ${VALIDATION_RULES}
 
-${EXTRACTION_RULES}
+${extractionWithLocs}
 
 ${ADVICE_RULES}
 
 ${REVENUE_ESTIMATION_RULES}
-${weatherSection}
+${weatherSection}${locationSection}
 【会話履歴】
 ${contextStr}
 

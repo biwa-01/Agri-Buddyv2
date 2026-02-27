@@ -6,7 +6,7 @@ import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 import type { LocalRecord, View } from '@/lib/types';
 import { GLASS, CARD_FLAT, DAY_NAMES, GENERIC_ADVICE_RE } from '@/lib/constants';
-import { fmtVal, extractNextActions, sanitizeLocation, extractCorrections, buildRecordChips } from '@/lib/logic/extraction';
+import { fmtVal, extractNextActions, sanitizeLocation, extractCorrections, buildRecordChips, normalizeLocationName } from '@/lib/logic/extraction';
 import { generateOfficialReport } from '@/lib/logic/report';
 import { loadRecs } from '@/lib/client/storage';
 import { ChartTooltip } from '@/components/ui/ChartTooltip';
@@ -83,8 +83,9 @@ export function HistoryView({
       const loc = r.location;
       if (!loc || !sanitizeLocation(loc)) continue;
       if (loc === '場所未定') continue;
-      if (loc.length >= 5 && !/ハウス|畑|園|圃場|露地|山/.test(loc)) continue;
-      locs.add(loc);
+      const normalized = normalizeLocationName(loc);
+      if (!normalized) continue;
+      locs.add(normalized);
     }
     return Array.from(locs).sort();
   }, [allRecords]);
@@ -105,9 +106,9 @@ export function HistoryView({
           const chipMatch = FILTER_CHIPS.some(c => activeChips.has(c.key) && c.match(r));
           if (!chipMatch) return false;
         }
-        // Location: OR
+        // Location: OR (normalize for matching old records)
         if (activeLocations.size > 0) {
-          if (!activeLocations.has(r.location)) return false;
+          if (!activeLocations.has(normalizeLocationName(r.location) || r.location)) return false;
         }
         // Text search: AND (all terms must match)
         if (terms.length > 0) {

@@ -2,6 +2,21 @@ import { AGRI_CORRECTIONS, WORK_CHIPS, NAV_NOISE_RE, FILLER_RE, LOCATION_GHOST_R
 import type { PartialSlots, ConfirmItem, LocalRecord } from '@/lib/types';
 import { isNegativeInput } from '@/lib/logic/advice';
 
+/* ── Location name normalization ── */
+const LOCATION_NORMALIZE_MAP: [RegExp, string][] = [
+  [/法事の上|宝地の上|ほうじのうえ|ホウジノウエ/i, 'ホウジノウエ'],
+  [/[AＡaａ]号?\s*ハウス|ハウス[AＡaａ]/i, 'Aハウス'],
+  [/[BＢbｂ]号?\s*ハウス|ハウス[BＢbｂ]/i, 'Bハウス'],
+];
+
+export function normalizeLocationName(raw: string): string {
+  if (!raw) return '';
+  for (const [re, normalized] of LOCATION_NORMALIZE_MAP) {
+    if (re.test(raw)) return normalized;
+  }
+  return raw.trim();
+}
+
 export function extractCorrections(rawText: string): { original: string; corrected: string }[] {
   const results: { original: string; corrected: string }[] = [];
   if (!rawText) return results;

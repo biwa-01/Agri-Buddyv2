@@ -1,6 +1,7 @@
-import type { LocalRecord, LastSession, EmotionAnalysis, MoodEntry, OutdoorWeather } from '@/lib/types';
-import { SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_MOOD, MEDIA_DB, MEDIA_STORE } from '@/lib/constants';
+import type { LocalRecord, LastSession, LocationMaster, EmotionAnalysis, MoodEntry, OutdoorWeather } from '@/lib/types';
+import { SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_MOOD, SK_LOCATIONS, MEDIA_DB, MEDIA_STORE } from '@/lib/constants';
 import { isValidTemp, isValidHumidity } from '@/lib/logic/validation';
+import { normalizeLocationName } from '@/lib/logic/extraction';
 
 /* ── localStorage ── */
 export function loadRecs(): LocalRecord[] {
@@ -68,6 +69,64 @@ export function deepClean() {
     if (dirty) localStorage.setItem(SK_RECORDS, JSON.stringify(cleaned));
     localStorage.setItem(SK_DEEP_CLEANED, '1');
   } catch { /* ignore */ }
+}
+
+/* ── Location Master ── */
+export function loadLocationMaster(): LocationMaster[] {
+  try { return JSON.parse(localStorage.getItem(SK_LOCATIONS) || '[]'); }
+  catch { return []; }
+}
+
+export function saveLocationMaster(masters: LocationMaster[]) {
+  localStorage.setItem(SK_LOCATIONS, JSON.stringify(masters));
+}
+
+export function addLocation(name: string, alias?: string): LocationMaster {
+  const masters = loadLocationMaster();
+  const normalized = normalizeLocationName(name);
+  if (!normalized) return masters[0] || { id: '', name: '', aliases: [], createdAt: 0 };
+  const existing = masters.find(m => m.name === normalized);
+  if (existing) {
+    if (alias && !existing.aliases.includes(alias)) {
+      existing.aliases.push(alias);
+      saveLocationMaster(masters);
+    }
+    return existing;
+  }
+  const newLoc: LocationMaster = {
+    id: crypto.randomUUID().slice(0, 8),
+    name: normalized,
+    aliases: alias && alias !== normalized ? [alias] : [],
+    createdAt: Date.now(),
+  };
+  masters.push(newLoc);
+  saveLocationMaster(masters);
+  return newLoc;
+}
+
+export function findLocationByName(name: string): LocationMaster | undefined {
+  const normalized = normalizeLocationName(name);
+  return loadLocationMaster().find(m =>
+    m.name === normalized || m.aliases.some(a => normalizeLocationName(a) === normalized)
+  );
+}
+
+export function getLocationNames(): string[] {
+  return loadLocationMaster().map(m => m.name);
+}
+
+export function migrateLocations() {
+  if (loadLocationMaster().length > 0) return;
+  const recs = loadRecs();
+  const seen = new Set<string>();
+  for (const r of recs) {
+    const loc = r.location;
+    if (!loc || loc === '場所未定' || seen.has(loc)) continue;
+    const normalized = normalizeLocationName(loc);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    addLocation(normalized, loc !== normalized ? loc : undefined);
+  }
 }
 
 /* ── IndexedDB Media Storage ── */

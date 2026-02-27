@@ -7,6 +7,7 @@ export const SK_RECORDS = 'agri-buddy-records';
 export const SK_SESSION = 'agri-buddy-last-session';
 export const SK_DEEP_CLEANED = 'agri-buddy-deep-cleaned-v1';
 export const SK_MOOD = 'agri-buddy-mood';
+export const SK_LOCATIONS = 'agri-buddy-locations';
 export const DEFAULT_LOC = '';
 export const LOCATION_OPTIONS = ['ハウスA', 'ハウスB', '山の畑', '露地', 'その他'] as const;
 export const DAY_NAMES = ['日', '月', '火', '水', '木', '金', '土'];
@@ -217,7 +218,12 @@ R（畝）=約100㎡、反=10a=1000㎡、町=1ha、「20kg袋の半分」=約10k
 【複数資材の完全記録】
 一度の入力で複数資材が言及 → 全てfertilizerに記録（銘柄+量+施用方法）
 例: 「堆肥10キロと石灰ばらまいてBMようりん2袋」
-→ "堆肥 約10kg/穴 局所施肥、石灰 全面散布、BMようりん 2袋"`,
+→ "堆肥 約10kg/穴 局所施肥、石灰 全面散布、BMようりん 2袋"
+
+【新しい場所の検出】
+ユーザーが既知の場所リスト以外の場所名を言及した場合、new_locationフィールドにその場所名を返す。
+既知の場所: {locationList}
+既知の場所に含まれる場合はnew_locationは返さない。`,
 
   ADMIN_LOG_RULES: `【admin_log生成ルール — 独立セクション】
 【最重要原則 — 原文丸写し厳禁】
@@ -318,6 +324,7 @@ adviceとの重複禁止。strategic_adviceは「次にやること」のアク�
   "material_cost": "str" (optional),
   "work_duration": "str" (optional),
   "fuel_cost": "str" (optional),
-  "estimated_revenue": N (optional, 収穫kg×800+作業h×1500)
+  "estimated_revenue": N (optional, 収穫kg×800+作業h×1500),
+  "new_location": "string (既知リスト外の新場所名。未検出ならフィールド省略)"
 }`,
 };
