@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   Mic, Camera, RotateCcw, Download, Check, X,
-  CalendarDays, Flame, FileScan,
+  CalendarDays, FileScan,
 } from 'lucide-react';
 
 import type {
@@ -155,6 +155,8 @@ export default function AgriBuddy() {
   const resultOffsetRef = useRef(0);        // onresultでの読み取り開始位置
   const mutedRef = useRef(false);           // TTS中にtrue→結果無視+オフセット前進
   const persistentRecogRef = useRef(false); // follow-up中のpersistentモードフラグ
+  const userStoppedRef = useRef(false);      // ユーザーが明示的に停止したか
+  const textPrefixRef = useRef('');           // 自動再起動時のテキスト蓄積用
 
   const phaseRef = useRef<Phase>('IDLE');
 
@@ -758,6 +760,8 @@ export default function AgriBuddy() {
     }
 
     if (recogRef.current) return; // 二重起動防止
+    userStoppedRef.current = false;
+    textPrefixRef.current = '';
     try {
       const r = createRecog();
       if (!r) {
@@ -776,7 +780,7 @@ export default function AgriBuddy() {
         let t = '';
         for (let i = resultOffsetRef.current; i < e.results.length; i++) t += e.results[i][0].transcript;
         t = correctAgriTerms(t);
-        chunksRef.current = t; setTranscript(t); spoke = true;
+        chunksRef.current = textPrefixRef.current + t; setTranscript(textPrefixRef.current + t); spoke = true;
       };
       r.onerror = (e: any) => {
         if (e.error === 'not-allowed') {
@@ -814,18 +818,39 @@ export default function AgriBuddy() {
         }
 
         recogRef.current = null;
-        if (spoke && followUpActiveRef.current) {
-          sasRef.current();
+
+        // follow-up中: 既存動作を維持
+        if (followUpActiveRef.current) {
+          if (spoke) sasRef.current();
+          else setPhase('FOLLOW_UP');
           return;
         }
-        if (spoke) {
-          setPhase('REVIEWING');
-        } else {
-          if (followUpActiveRef.current) {
-            setPhase('FOLLOW_UP');
-          }
-          // 非follow-up: 現在のphaseに留まる（ユーザーがマイクタップで再試行）
+
+        // 通常モード: ユーザー停止でなければ自動再起動
+        if (!userStoppedRef.current) {
+          textPrefixRef.current = chunksRef.current;
+          setTimeout(() => {
+            if (userStoppedRef.current || recogRef.current) return;
+            try {
+              const r2 = createRecog(); if (!r2) return;
+              resultOffsetRef.current = 0;
+              r2.onresult = r.onresult;
+              r2.onerror = r.onerror;
+              r2.onend = r.onend;
+              r2.start();
+              recogRef.current = r2;
+            } catch {
+              recogRef.current = null;
+              if (spoke) setPhase('REVIEWING');
+            }
+          }, 300);
+          return;
         }
+
+        // ユーザーが明示的に停止
+        clr();
+        if (spoke) { setPhase('REVIEWING'); }
+        else { setPhase('IDLE'); }
       };
       resultOffsetRef.current = 0;
       // Singleton: 同一インスタンスで stop→再start（新規生成しない）
@@ -1324,6 +1349,7 @@ export default function AgriBuddy() {
           mutedRef.current = true;
           sasRef.current(); // recog停止せずに処理
         } else {
+          userStoppedRef.current = true;
           try { recogRef.current?.stop(); } catch {}
         }
       }
@@ -1337,6 +1363,7 @@ export default function AgriBuddy() {
           mutedRef.current = true;
           sasRef.current();
         } else {
+          userStoppedRef.current = true;
           try { recogRef.current?.stop(); } catch {}
         }
       }
@@ -1374,12 +1401,6 @@ export default function AgriBuddy() {
         <div className="flex items-center justify-between">
           <h1 className="font-display text-3xl font-black text-white tracking-wider">{APP_NAME}</h1>
           <div className="flex items-center gap-2">
-            {mounted && streak > 0 && (
-              <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-bold ${streakColor}`}>
-                <Flame className="w-3.5 h-3.5" />
-                <span>{streak}日</span>
-              </div>
-            )}
             {outdoor && outdoor.code >= 0 && (
               <div className={`px-2.5 py-1 rounded-full text-sm font-bold ${CARD_FLAT}`}>
                 <span className="text-stone-700">{outdoor.description} {outdoor.temperature}℃</span>
@@ -1392,16 +1413,11 @@ export default function AgriBuddy() {
                 {isOnline ? '同期済' : `未同期${pendSync > 0 ? `(${pendSync})` : ''}`}
               </div>
             )}
-            {conv.length > 0 && view === 'record' && (
-              <button onClick={reset} className="p-1.5 rounded-full hover:bg-white/20 transition-colors btn-press">
-                <RotateCcw className="w-5 h-5 text-white/60" />
-              </button>
-            )}
           </div>
         </div>
         {mounted && (
           <p className="text-sm font-medium text-white/50 mt-1">
-            {curLoc ? `${curLoc} | ` : ''}{dateStr}
+            {dateStr}
           </p>
         )}
       </header>
