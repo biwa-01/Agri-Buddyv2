@@ -10,7 +10,7 @@ const LOCATION_NORMALIZE_MAP: [RegExp, string][] = [
 ];
 
 export function normalizeLocationName(raw: string): string {
-  if (!raw) return '';
+  if (!raw || typeof raw !== 'string') return '';
   for (const [re, normalized] of LOCATION_NORMALIZE_MAP) {
     if (re.test(raw)) return normalized;
   }

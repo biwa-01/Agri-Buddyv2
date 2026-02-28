@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, ChevronDown, Mic, Sprout, TrendingUp, Search, X, MapPin } from 'lucide-react';
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -11,6 +11,33 @@ import { generateOfficialReport } from '@/lib/logic/report';
 import { loadRecs } from '@/lib/client/storage';
 import { ChartTooltip } from '@/components/ui/ChartTooltip';
 import { Linkify } from '@/components/ui/Linkify';
+
+/* ── Error Boundary for record detail ── */
+class RecordErrorBoundary extends React.Component<
+  { children: React.ReactNode; onReset?: () => void },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: Error) { console.error('[RecordDetail crash]', error); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="mx-5 mb-4 p-5 rounded-2xl bg-red-50 border border-red-200">
+          <p className="text-lg font-bold text-red-700 mb-2">表示エラー</p>
+          <p className="text-base text-red-600">このレコードのデータ形式に不整合があります。他の日付は正常に表示できます。</p>
+          {this.props.onReset && (
+            <button onClick={() => { this.setState({ hasError: false }); this.props.onReset?.(); }}
+              className="mt-3 px-4 py-2 rounded-xl bg-red-100 text-red-700 font-bold text-sm">
+              閉じる
+            </button>
+          )}
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 /* ── Filter chip definitions ── */
 const FILTER_CHIPS = [
@@ -81,7 +108,7 @@ export function HistoryView({
     const locs = new Set<string>();
     for (const r of allRecords) {
       const loc = r.location;
-      if (!loc || !sanitizeLocation(loc)) continue;
+      if (!loc || typeof loc !== 'string' || !sanitizeLocation(loc)) continue;
       if (loc === '場所未定') continue;
       const normalized = normalizeLocationName(loc);
       if (!normalized) continue;
@@ -108,7 +135,8 @@ export function HistoryView({
         }
         // Location: OR (normalize for matching old records)
         if (activeLocations.size > 0) {
-          if (!activeLocations.has(normalizeLocationName(r.location) || r.location)) return false;
+          const normLoc = normalizeLocationName(r.location || '') || r.location || '';
+          if (!activeLocations.has(normLoc)) return false;
         }
         // Text search: AND (all terms must match)
         if (terms.length > 0) {
@@ -453,6 +481,7 @@ export function HistoryView({
 
       {/* ── Record Detail ── */}
       {calSelected && (
+        <RecordErrorBoundary onReset={() => setCalDate(null)}>
         <>
         <section ref={detailRef} className="mx-2 mb-4 fade-up">
           <div className={`p-5 rounded-2xl ${GLASS}`}>
@@ -543,12 +572,16 @@ export function HistoryView({
                 ))}
               </div>
             )}
-            {calSelected.estimated_profit != null && calSelected.estimated_profit > 0 && (
-              <div className="mt-3 p-3 rounded-xl bg-green-50/70 border border-green-200/50">
-                <p className="text-sm font-bold text-green-700 mb-1">見込み増益</p>
-                <p className="text-lg font-black text-green-800">推定 +{calSelected.estimated_profit >= 10000 ? `${(calSelected.estimated_profit / 10000).toFixed(1)}万円` : `${calSelected.estimated_profit.toLocaleString()}円`}</p>
-              </div>
-            )}
+            {(() => {
+              const profit = Number(calSelected.estimated_profit) || 0;
+              if (profit <= 0) return null;
+              return (
+                <div className="mt-3 p-3 rounded-xl bg-green-50/70 border border-green-200/50">
+                  <p className="text-sm font-bold text-green-700 mb-1">見込み増益</p>
+                  <p className="text-lg font-black text-green-800">推定 +{profit >= 10000 ? `${(profit / 10000).toFixed(1)}万円` : `${profit.toLocaleString()}円`}</p>
+                </div>
+              );
+            })()}
             {(calSelected.strategic_advice || calSelected.advice) && (() => {
               const isGeneric = GENERIC_ADVICE_RE.test(calSelected.advice || '') && GENERIC_ADVICE_RE.test(calSelected.strategic_advice || '');
               if (isGeneric) return (
@@ -609,6 +642,7 @@ export function HistoryView({
           </button>
         </section>
         </>
+        </RecordErrorBoundary>
       )}
 
     </div>

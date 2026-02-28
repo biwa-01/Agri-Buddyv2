@@ -10,7 +10,26 @@ export function loadRecs(): LocalRecord[] {
     return raw.filter((r): r is LocalRecord => {
       try { return r != null && typeof r === 'object' && 'id' in r && 'date' in r; }
       catch { return false; }
-    });
+    }).map(r => ({
+      ...r,
+      location: r.location ?? '',
+      work_log: r.work_log ?? '',
+      plant_status: r.plant_status ?? '良好',
+      advice: r.advice ?? '',
+      admin_log: r.admin_log ?? '',
+      fertilizer: r.fertilizer ?? '',
+      pest_status: r.pest_status ?? '',
+      harvest_amount: r.harvest_amount ?? '',
+      material_cost: r.material_cost ?? '',
+      work_duration: r.work_duration ?? '',
+      fuel_cost: r.fuel_cost ?? '',
+      strategic_advice: r.strategic_advice ?? '',
+      photo_count: r.photo_count ?? 0,
+      synced: r.synced ?? false,
+      timestamp: r.timestamp ?? 0,
+      house_data: r.house_data ?? null,
+      estimated_profit: typeof r.estimated_profit === 'number' ? r.estimated_profit : (r.estimated_profit != null ? Number(r.estimated_profit) || undefined : undefined),
+    }));
   } catch { return []; }
 }
 export function saveRecLS(r: LocalRecord) { const rs = loadRecs(); rs.push(r); localStorage.setItem(SK_RECORDS, JSON.stringify(rs)); }
