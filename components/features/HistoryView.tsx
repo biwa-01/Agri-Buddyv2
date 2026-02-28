@@ -64,8 +64,8 @@ interface HistoryViewProps {
   calDate: string | null;
   setCalDate: React.Dispatch<React.SetStateAction<string | null>>;
   todayISO: string;
-  recordMap: Map<string, LocalRecord>;
-  calSelected: LocalRecord | null;
+  recordMap: Map<string, LocalRecord[]>;
+  calSelected: LocalRecord[] | null;
   selectedMedia: { url: string; type: string }[];
   setFullscreenMedia: (m: { url: string; type: string } | null) => void;
   setView: (v: View) => void;
@@ -95,7 +95,7 @@ export function HistoryView({
   };
 
   /* ── Derived: all records as flat array ── */
-  const allRecords = useMemo(() => Array.from(recordMap.values()), [recordMap]);
+  const allRecords = useMemo(() => Array.from(recordMap.values()).flat(), [recordMap]);
 
   /* ── Available chips (only categories with data) ── */
   const availableChips = useMemo(() =>
@@ -411,14 +411,14 @@ export function HistoryView({
               const rpt = generateOfficialReport(loadRecs(), calMonth.getFullYear(), calMonth.getMonth(), 1);
               onShowReport(rpt, 'month');
             }} className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-stone-900/80 text-white text-base font-bold hover:bg-stone-900 btn-press">
-              {calMonth.getMonth() + 1}月レポート
+              栽培管理記録
             </button>
             <button onClick={() => {
               const startMonth = calMonth.getMonth() < 6 ? 0 : 6;
               const rpt = generateOfficialReport(loadRecs(), calMonth.getFullYear(), startMonth, 6);
               onShowReport(rpt, 'half');
             }} className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-base font-bold btn-press">
-              半期報告書
+              防除実績一覧
             </button>
           </div>
 
@@ -480,15 +480,24 @@ export function HistoryView({
       )}
 
       {/* ── Record Detail ── */}
-      {calSelected && (
+      {calSelected && calSelected.length > 0 && (
         <RecordErrorBoundary onReset={() => setCalDate(null)}>
         <>
         <section ref={detailRef} className="mx-2 mb-4 fade-up">
-          <div className={`p-5 rounded-2xl ${GLASS}`}>
-            <p className="text-4xl font-black text-amber-700 mb-3">{calDate}</p>
+          <p className="text-4xl font-black text-amber-700 mb-3 px-5">{calDate}</p>
+          {calSelected.length > 1 && (
+            <p className="text-sm font-bold text-stone-500 px-5 mb-2">{calSelected.length}件の記録</p>
+          )}
+          {calSelected.map((rec, idx) => (
+          <div key={rec.id} className={`p-5 rounded-2xl ${GLASS} ${idx > 0 ? 'mt-3' : ''}`}>
+            {calSelected.length > 1 && rec.location && (
+              <p className="text-base font-bold text-amber-600 mb-2 flex items-center gap-1">
+                <MapPin className="w-4 h-4" />{rec.location}
+              </p>
+            )}
             {/* ── チップ帯 ── */}
             {(() => {
-              const chips = buildRecordChips(calSelected);
+              const chips = buildRecordChips(rec);
               if (chips.length === 0) return null;
               const colorMap: Record<string, string> = {
                 amber: 'bg-amber-100 text-amber-800 border-amber-200',
@@ -509,28 +518,28 @@ export function HistoryView({
               );
             })()}
             {/* ── house_data: 気温・湿度（ヘッダー部） ── */}
-            {calSelected.house_data && (
+            {rec.house_data && (
               <div className="flex items-baseline justify-center gap-3 mb-3 flex-wrap">
-                {calSelected.house_data.max_temp != null && (
+                {rec.house_data.max_temp != null && (
                   <div className="text-center">
-                    <p className="text-4xl font-black text-stone-900">{fmtVal(calSelected.house_data.max_temp, '℃')}</p>
+                    <p className="text-4xl font-black text-stone-900">{fmtVal(rec.house_data.max_temp, '℃')}</p>
                     <p className="text-base font-bold text-stone-600">最高</p>
                   </div>
                 )}
-                {calSelected.house_data.max_temp != null && calSelected.house_data.min_temp != null && (
+                {rec.house_data.max_temp != null && rec.house_data.min_temp != null && (
                   <span className="text-2xl font-bold text-stone-400">/</span>
                 )}
-                {calSelected.house_data.min_temp != null && (
+                {rec.house_data.min_temp != null && (
                   <div className="text-center">
-                    <p className="text-4xl font-black text-stone-900">{fmtVal(calSelected.house_data.min_temp, '℃')}</p>
+                    <p className="text-4xl font-black text-stone-900">{fmtVal(rec.house_data.min_temp, '℃')}</p>
                     <p className="text-base font-bold text-stone-600">最低</p>
                   </div>
                 )}
-                {calSelected.house_data.humidity != null && (
+                {rec.house_data.humidity != null && (
                   <>
                     <span className="text-2xl font-bold text-stone-400">|</span>
                     <div className="text-center">
-                      <p className="text-4xl font-black text-stone-900">{fmtVal(calSelected.house_data.humidity, '%')}</p>
+                      <p className="text-4xl font-black text-stone-900">{fmtVal(rec.house_data.humidity, '%')}</p>
                       <p className="text-base font-bold text-stone-600">湿度</p>
                     </div>
                   </>
@@ -538,21 +547,21 @@ export function HistoryView({
               </div>
             )}
             {/* ── 区切り線: ヘッダー部と本文部の分離 ── */}
-            {calSelected.house_data && (calSelected.admin_log || calSelected.work_log) && (
+            {rec.house_data && (rec.admin_log || rec.work_log) && (
               <hr className="border-stone-200/50 my-3" />
             )}
             {/* ── admin_log: 青系カード ── */}
-            {calSelected.admin_log && (
+            {rec.admin_log && (
               <div className="mt-3 p-4 rounded-xl bg-blue-50 border-2 border-blue-300">
                 <p className="text-xl font-black text-blue-800 mb-1 flex items-center gap-1.5">
                   <Sprout className="w-5 h-5" />AI補正後の日誌
                 </p>
-                <pre className="text-xl font-medium text-blue-900 whitespace-pre-wrap leading-relaxed font-serif">{calSelected.admin_log}</pre>
+                <pre className="text-xl font-medium text-blue-900 whitespace-pre-wrap leading-relaxed font-serif">{rec.admin_log}</pre>
               </div>
             )}
             {/* ── AI補正バッジ ── */}
-            {calSelected.raw_transcript && (() => {
-              const corrections = extractCorrections(calSelected.raw_transcript ?? '');
+            {rec.raw_transcript && (() => {
+              const corrections = extractCorrections(rec.raw_transcript ?? '');
               if (corrections.length === 0) return null;
               return (
                 <div className="flex flex-wrap gap-1.5 mt-2 mb-3">
@@ -567,18 +576,18 @@ export function HistoryView({
               );
             })()}
             <div className="space-y-3 text-2xl">
-              {!calSelected.admin_log && calSelected.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {calSelected.work_log}</span></div>}
-              {calSelected.work_duration && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">時間:</b> {calSelected.work_duration}</span></div>}
-              {calSelected.fertilizer && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">施肥:</b> {calSelected.fertilizer}</span></div>}
-              {calSelected.pest_status && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">病害虫:</b> {calSelected.pest_status}</span></div>}
-              {calSelected.harvest_amount && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">収穫:</b> {calSelected.harvest_amount}</span></div>}
-              {calSelected.material_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">資材費:</b> {calSelected.material_cost}</span></div>}
-              {calSelected.fuel_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">燃料費:</b> {calSelected.fuel_cost}</span></div>}
-              {calSelected.plant_status && calSelected.plant_status !== '良好' && (
-                <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">所見:</b> {calSelected.plant_status}</span></div>
+              {!rec.admin_log && rec.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {rec.work_log}</span></div>}
+              {rec.work_duration && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">時間:</b> {rec.work_duration}</span></div>}
+              {rec.fertilizer && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">施肥:</b> {rec.fertilizer}</span></div>}
+              {rec.pest_status && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">病害虫:</b> {rec.pest_status}</span></div>}
+              {rec.harvest_amount && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">収穫:</b> {rec.harvest_amount}</span></div>}
+              {rec.material_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">資材費:</b> {rec.material_cost}</span></div>}
+              {rec.fuel_cost && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">燃料費:</b> {rec.fuel_cost}</span></div>}
+              {rec.plant_status && rec.plant_status !== '良好' && (
+                <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">所見:</b> {rec.plant_status}</span></div>
               )}
             </div>
-            {selectedMedia.length > 0 && (
+            {idx === 0 && selectedMedia.length > 0 && (
               <div className="grid grid-cols-2 gap-2 my-3">
                 {selectedMedia.map((m, i) => (
                   <button key={i} onClick={() => setFullscreenMedia(m)} className="relative rounded-xl overflow-hidden border border-stone-200/50 btn-press">
@@ -599,7 +608,7 @@ export function HistoryView({
               </div>
             )}
             {(() => {
-              const profit = Number(calSelected.estimated_profit) || 0;
+              const profit = Number(rec.estimated_profit) || 0;
               if (profit <= 0) return null;
               return (
                 <div className="mt-3 p-3 rounded-xl bg-green-50/70 border border-green-200/50">
@@ -608,15 +617,15 @@ export function HistoryView({
                 </div>
               );
             })()}
-            {(calSelected.strategic_advice || calSelected.advice) && (() => {
-              const isGeneric = GENERIC_ADVICE_RE.test(calSelected.advice || '') && GENERIC_ADVICE_RE.test(calSelected.strategic_advice || '');
+            {(rec.strategic_advice || rec.advice) && (() => {
+              const isGeneric = GENERIC_ADVICE_RE.test(rec.advice || '') && GENERIC_ADVICE_RE.test(rec.strategic_advice || '');
               if (isGeneric) return (
                 <div className="mt-3 p-3 rounded-xl bg-stone-50/50 border border-stone-200/30">
                   <p className="text-base font-medium text-stone-400">詳細を入力すると分析が表示されます</p>
                 </div>
               );
-              const { analysisOnly, actions } = extractNextActions(calSelected.advice || '', calSelected.strategic_advice || '');
-              const strategicLines = (calSelected.strategic_advice || '').split('\n').filter(l => !/^次回:\s*/.test(l)).join('\n').trim();
+              const { analysisOnly, actions } = extractNextActions(rec.advice || '', rec.strategic_advice || '');
+              const strategicLines = (rec.strategic_advice || '').split('\n').filter(l => !/^次回:\s*/.test(l)).join('\n').trim();
 
               const REF_RE = /^【参考】/;
               const allLines = (analysisOnly || '').split('\n').filter(l => l.trim() && !REF_RE.test(l));
@@ -658,8 +667,8 @@ export function HistoryView({
                 ) : null}
               </>);
             })()}
-            {/* raw_transcript: UIから除外（localStorageには保持、AI補正バッジで活用） */}
           </div>
+          ))}
         </section>
         <section className="mx-5 mb-4">
           <button onClick={() => setView('record')}

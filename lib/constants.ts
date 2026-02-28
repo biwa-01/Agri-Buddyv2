@@ -163,12 +163,15 @@ export const GEMINI_PROMPT_SECTIONS = {
 - house_data は実測値がある場合のみ返す。ない場合はnullとする。`,
 
   EXTRACTION_RULES: `【抽出 + 不足判定 — 最重要】
-■ 言及判定（抽出とmissing_questionsの共通ルール）:
-- ユーザーが少しでも言及していれば「言及済み」→ 抽出してmissing_questionsから除外
-- 否定も言及: 「肥料はやってない」→ fertilizer="なし"、FERTILIZER除外
-- 否定も言及: 「虫はいない」→ pest_status="なし"、PEST除外
-- 曖昧でも言及: 「30度くらい」→ house_data.max_temp=30、HOUSE_TEMP除外
-- 完全に未言及の項目のみmissing_questionsに残す
+■ missing_questionsの厳格判定（最優先ルール）:
+missing_questionsは「完全に未言及」の項目のみ。少しでも触れていれば除外せよ。
+- 動詞1つでも言及 → 除外: 「灌水した」「剪定した」→ WORKは除外
+- 否定も言及: 「肥料やってない」「農薬なし」→ fertilizer="なし"、FERTILIZER/PEST除外
+- 曖昧でも言及: 「30度くらい」→ HOUSE_TEMP除外
+- 作業動詞（した、やった、かけた、まいた、とった等）が1つでもあればWORKは除外
+- 「特になし」「なかった」等の否定回答 → 該当カテゴリを除外（値は"なし"で抽出）
+- 自由入力の内容を最大限に活用し、missing_questionsは最小限にせよ
+- 迷ったら除外する側に倒せ。ユーザーへの過剰な質問は体験を損なう
 
 ■ missing_questions有効キー（これ以外は返すな）:
 "WORK" / "HOUSE_TEMP" / "FERTILIZER" / "PEST" / "HARVEST" / "COST" / "DURATION"

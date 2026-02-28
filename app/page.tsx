@@ -164,26 +164,31 @@ export default function AgriBuddy() {
 
   const calDays = useMemo(() => getCalDays(calMonth.getFullYear(), calMonth.getMonth()), [calMonth]);
   const recordMap = useMemo(() => {
-    if (!mounted) return new Map<string, LocalRecord>();
+    if (!mounted) return new Map<string, LocalRecord[]>();
     void histVer;
-    const m = new Map<string, LocalRecord>();
-    loadRecs().forEach(r => { if (!m.has(r.date) || r.timestamp > m.get(r.date)!.timestamp) m.set(r.date, r); });
+    const m = new Map<string, LocalRecord[]>();
+    loadRecs().forEach(r => {
+      const arr = m.get(r.date) || [];
+      arr.push(r);
+      m.set(r.date, arr);
+    });
+    for (const arr of m.values()) arr.sort((a, b) => b.timestamp - a.timestamp);
     return m;
   }, [mounted, histVer]);
 
-  const calSelected = useMemo(() => calDate ? recordMap.get(calDate) ?? null : null, [calDate, recordMap]);
+  const calSelected = useMemo(() => calDate ? recordMap.get(calDate) ?? null : null, [calDate, recordMap]) as LocalRecord[] | null;
 
   /* ── Load media for selected record ── */
   useEffect(() => {
-    if (!calSelected) { setSelectedMedia([]); return; }
+    if (!calSelected || calSelected.length === 0) { setSelectedMedia([]); return; }
     let cancelled = false;
-    loadMediaForRecord(calSelected.id).then(items => {
+    loadMediaForRecord(calSelected[0].id).then(items => {
       if (cancelled) return;
       setSelectedMedia(items.map(m => ({ url: URL.createObjectURL(m.blob), type: m.type })));
     }).catch(() => { if (!cancelled) setSelectedMedia([]); });
     return () => { cancelled = true; selectedMedia.forEach(m => URL.revokeObjectURL(m.url)); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [calSelected?.id]);
+  }, [calSelected?.[0]?.id]);
 
   const weeklyCount = useMemo(() => {
     if (!mounted) return 0;
@@ -220,7 +225,7 @@ export default function AgriBuddy() {
       const d = new Date(today);
       d.setDate(d.getDate() - i);
       const iso = d.toISOString().split('T')[0];
-      const rec = recordMap.get(iso);
+      const rec = recordMap.get(iso)?.[0];
       data.push({
         date: `${d.getMonth() + 1}/${d.getDate()}`,
         max_temp: rec?.house_data?.max_temp ?? null,
