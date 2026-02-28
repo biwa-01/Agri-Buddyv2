@@ -6,12 +6,13 @@ import { SOS_RE, GEMINI_PROMPT_SECTIONS } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
   try {
-    const { text, context, location, outdoor, knownLocations } = await req.json() as {
+    const { text, context, location, outdoor, knownLocations, locations } = await req.json() as {
       text: string;
       context: ConvMessage[];
       location?: string;
       outdoor?: OutdoorWeather | null;
       knownLocations?: string[];
+      locations?: string[];
     };
 
     // ─── SOS Detection (server-side double check) ───
@@ -30,15 +31,18 @@ export async function POST(req: NextRequest) {
       .map(m => `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${m.text}`)
       .join('\n');
 
-    const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
+    const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, ADMIN_LOG_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
 
     const weatherSection = outdoor
       ? `\n【本日の天気】${outdoor.description} ${outdoor.temperature}℃\n`
       : '';
 
-    const locationSection = location
-      ? `\n【現在の記録場所】${location}\n`
-      : '';
+    const multiLocations = locations && locations.length >= 2;
+    const locationSection = multiLocations
+      ? `\n【記録対象の場所（複数）】${locations.join(', ')}\n※ per_location配列で場所ごとに分離して返すこと。各場所にwork_log, admin_log, house_data, fertilizer, pest_status, pesticide_detail, harvest_amount等を個別に割り当てる。\n`
+      : location
+        ? `\n【現在の記録場所】${location}\n`
+        : '';
 
     const locList = (knownLocations && knownLocations.length > 0)
       ? knownLocations.join(', ')
@@ -57,6 +61,8 @@ ${SILENT_COMPLETION_RULES}
 ${VALIDATION_RULES}
 
 ${extractionWithLocs}
+
+${ADMIN_LOG_RULES}
 
 ${ADVICE_RULES}
 

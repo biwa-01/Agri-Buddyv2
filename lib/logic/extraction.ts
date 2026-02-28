@@ -150,6 +150,7 @@ export function buildSlotsFromPending(d: Record<string, any>): PartialSlots {
   const slots: PartialSlots = {
     work_log: d.work_log, plant_status: d.plant_status,
     fertilizer: d.fertilizer, pest_status: d.pest_status,
+    pesticide_detail: d.pesticide_detail,
     harvest_amount: d.harvest_amount, material_cost: d.material_cost,
     work_duration: d.work_duration, fuel_cost: d.fuel_cost,
   };

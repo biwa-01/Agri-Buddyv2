@@ -47,29 +47,24 @@ export const AGRI_CORRECTIONS: [RegExp, string][] = [
   [/お昼/, '肥料'], [/違い/, '使い'], [/と(\d)/, '度$1'],
   [/高温日/, '高温時'], [/反省/, '反転'], [/家事/, '花芽'],
   [/木の実/, '肥料'], [/化け物/, '化成肥料'],
+  // 肥料系
+  [/BMS|ビーエムエス|ビーエス/, 'BMようりん'],
+  [/消石灰|しょうせっかい/, '消石灰'],
+  [/石灰窒素|せっかいちっそ/, '石灰窒素'],
+  [/苦土石灰|くどせっかい/, '苦土石灰'],
+  // 農薬系
+  [/トレボン|とれぼん/, 'トレボン乳剤'],
+  [/アミスター|あみすたー/, 'アミスター20フロアブル'],
+  [/スミチオン|すみちおん/, 'スミチオン乳剤'],
+  [/ダコニール|だこにーる/, 'ダコニール1000'],
+  [/モスピラン|もすぴらん/, 'モスピラン水溶剤'],
+  [/カリグリーン|かりぐりーん/, 'カリグリーン'],
 ];
 
-export const FOLLOW_UP_QUESTIONS: Record<FollowUpStep, string[]> = {
-  WORK: ['今日はどんな作業しました？'],
-  HOUSE_TEMP: ['ハウスの温度はどうでした？最高と最低、どっちも教えてくれると助かります！'],
-  FERTILIZER: ['肥料や栄養、何かあげました？'],
-  PEST: ['病気や虫、気になるヤツはいませんでしたか？'],
-  HARVEST: ['収穫、ありましたか？どのくらい穫れたか教えてください！'],
-  COST: ['資材や燃料とか、お金かかったものあります？'],
-  DURATION: ['今日、何時間くらい頑張りました？'],
-  PHOTO: ['最後！写真残しておきますか？'],
-};
-
-/* ── Structured extraction: classify input to step ── */
-export const CLASSIFY_RE: Record<FollowUpStep, RegExp> = {
-  WORK: /灌水|剪定|散布|摘果|施肥|観察|収穫|換気|袋かけ|消毒|出荷|作業|草刈|定植/,
-  HOUSE_TEMP: /\d+度|\d+℃|温度|気温|最高|最低/,
-  FERTILIZER: /肥料|追肥|元肥|窒素|リン|カリ|有機|化成|施肥|撒いた|まいた/,
-  PEST: /病|虫|害|薬|殺虫|殺菌|防除|散布|カイガラ|すす|紋羽|灰斑|黒点/,
-  HARVEST: /収穫|穫れた|取れた|出荷|kg|キロ|コンテナ|箱|個|玉/,
-  COST: /円|費|コスト|経費|支出|買った|購入|万|千/,
-  DURATION: /時間|分|午前|午後|朝|昼|夕|始め|終わ/,
-  PHOTO: /撮った|とった|写真|画像/,
+export const GUIDED_QUESTIONS: Record<FollowUpStep, string[]> = {
+  LOCATION: ['どこで作業しましたか？場所を教えてください。'],
+  WORK: ['作業の内容をもう少し詳しく教えてください。'],
+  MATERIALS: ['農薬や肥料は使いましたか？使った場合は名前と量も教えてください。'],
 };
 
 /* ── pest_status verb stripping ── */
@@ -127,6 +122,11 @@ export const GEMINI_PROMPT_SECTIONS = {
 - 「高温日」→「高温時」、「家事」→「花芽」、「木の実」→「肥料」
 - 「化け物」→「化成肥料」、「反省」→「反転」
 - 「麦茶ハウス」→「ハウス」、「ビバハウス」「ビーバーハウス」→「枇杷ハウス」
+- 「BMS」「ビーエムエス」→「BMようりん」（肥料文脈）
+- 「消石灰」「しょうせっかい」→「消石灰」
+- 「トレボン」→「トレボン乳剤」、「アミスター」→「アミスター20フロアブル」
+- 「スミチオン」→「スミチオン乳剤」、「ダコニール」→「ダコニール1000」
+- 「モスピラン」→「モスピラン水溶剤」、「カリグリーン」→「カリグリーン」
 - 「期日」→「気温」（「期日まで」は除く）、「湿温度」→「湿度」
 - 「散歩」→「散布」（「散歩しに」等は除く）
 - 農業文脈では常に農業用語を優先し、日常語の解釈は避けること
@@ -195,6 +195,7 @@ export const GEMINI_PROMPT_SECTIONS = {
    石灰・ようりん・堆肥も全てこのフィールドに含める。
 
 5. pest_status: 病害虫の有無・種類・被害程度
+5.5. pesticide_detail: 防除の一行要約。農薬名・希釈倍率・使用量・対象病害虫を「トレボン乳剤 1000倍 10L（カイガラムシ）」形式で返す。農薬未使用なら省略。
 6. harvest_amount: 収穫量（品目・数量・単位）
 7. material_cost: 資材費（品目・金額）
 8. work_duration: 作業時間
@@ -261,6 +262,7 @@ admin_logは「プロの営農日誌」として出力する。以下を厳守:
 ■[メイン地点名]（場所がある場合）
 ・[作業]: 対象作物・作業詳細・数量
 ・[資材]: 種類・投入量・施用方法
+・[防除]: 農薬名 / 希釈倍率 / 使用量 / 対象病害虫
 ・[環境]: 最高XX℃ / 最低XX℃ / 湿度XX%
 ・[特記]: 病害虫・所見
 ■他地点の記録（複数地点の場合のみ）
@@ -324,7 +326,11 @@ adviceとの重複禁止。strategic_adviceは「次にやること」のアク�
   "material_cost": "str" (optional),
   "work_duration": "str" (optional),
   "fuel_cost": "str" (optional),
+  "pesticide_detail": "str (optional, 「農薬名 希釈倍率 使用量（対象病害虫）」形式の一行)",
   "estimated_revenue": N (optional, 収穫kg×800+作業h×1500),
-  "new_location": "string (既知リスト外の新場所名。未検出ならフィールド省略)"
+  "new_location": "string (既知リスト外の新場所名。未検出ならフィールド省略)",
+  "per_location": [
+    { "location": "str", "work_log": "str", "admin_log": "str", "house_data": {...}|null, "fertilizer": "str", "pest_status": "str", "pesticide_detail": "str", "harvest_amount": "str", "material_cost": "str", "work_duration": "str", "fuel_cost": "str", "plant_status": "str", "advice": "str", "strategic_advice": "str" }
+  ] (optional, 複数場所が指定された場合のみ。場所ごとに分離した記録を配列で返す)
 }`,
 };

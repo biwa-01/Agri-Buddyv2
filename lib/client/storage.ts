@@ -28,6 +28,7 @@ export function loadRecs(): LocalRecord[] {
       work_duration: String(r.work_duration ?? ''),
       fuel_cost: String(r.fuel_cost ?? ''),
       strategic_advice: String(r.strategic_advice ?? ''),
+      pesticide_detail: String(r.pesticide_detail ?? ''),
       photo_count: r.photo_count ?? 0,
       synced: r.synced ?? false,
       timestamp: r.timestamp ?? 0,

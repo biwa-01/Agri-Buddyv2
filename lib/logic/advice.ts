@@ -197,6 +197,7 @@ export function generateAdminLog(slots: PartialSlots, loc: string): string {
   if (slots.harvest_amount && !isNegativeInput(slots.harvest_amount)) lines.push(`・収穫: ${slots.harvest_amount}`);
   if (slots.material_cost) lines.push(`・資材費: ${slots.material_cost}`);
   if (slots.fuel_cost) lines.push(`・燃料費: ${slots.fuel_cost}`);
+  if (slots.pesticide_detail) lines.push(`・防除: ${slots.pesticide_detail}`);
   if (slots.pest_status && !isNegativeInput(slots.pest_status)) lines.push(`・特記: ${slots.pest_status}`);
   if (slots.plant_status && slots.plant_status !== '良好') lines.push(`・所見: ${slots.plant_status}`);
 

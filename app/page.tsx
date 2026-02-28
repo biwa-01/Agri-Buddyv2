@@ -2,8 +2,8 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
-  Mic, Camera, RotateCcw, Download, Check, X,
-  CalendarDays, FileScan,
+  Mic, Camera, Download, X,
+  CalendarDays, FileScan, Check,
 } from 'lucide-react';
 
 import type {
@@ -16,13 +16,12 @@ import {
   SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED,
   DAY_NAMES,
   GLASS, CARD_FLAT, CARD_ACCENT,
-  FOLLOW_UP_QUESTIONS,
+  GUIDED_QUESTIONS,
   MAX_MEDIA_PER_RECORD,
   NAV_NOISE_RE,
 } from '@/lib/constants';
-import { isValidTemp } from '@/lib/logic/validation';
 import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
-import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, buildSlotsFromConfirmItems, normalizeLocationName } from '@/lib/logic/extraction';
+import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, normalizeLocationName } from '@/lib/logic/extraction';
 import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
 import { speak, createRecog, invalidateRecogCache, isIOS } from '@/lib/client/speech';
@@ -68,6 +67,7 @@ export default function AgriBuddy() {
   // Dynamic location master
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [isNewLocation, setIsNewLocation] = useState(false);
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
 
   // HTTPS誘導
   const [httpsRedirectUrl, setHttpsRedirectUrl] = useState<string | null>(null);
@@ -91,10 +91,6 @@ export default function AgriBuddy() {
 
   // Save-time Gemini wait
   const [saving, setSaving] = useState(false);
-
-  // Voice correction on CONFIRM screen
-  const [correctionListening, setCorrectionListening] = useState(false);
-  const [correctionTranscript, setCorrectionTranscript] = useState('');
 
   // Mentor mode
   const [mentorDraft, setMentorDraft] = useState('');
@@ -242,7 +238,7 @@ export default function AgriBuddy() {
     return loadRecs().length === 0;
   }, [mounted, histVer]);
 
-  const isActivePhase = phase === 'LISTENING' || phase === 'REVIEWING' || phase === 'THINKING' || phase === 'FOLLOW_UP' || phase === 'BREATHING' || phase === 'CONFIRM' || phase === 'MENTOR';
+  const isActivePhase = phase === 'LISTENING' || phase === 'THINKING' || phase === 'FOLLOW_UP' || phase === 'BREATHING' || phase === 'CONFIRM' || phase === 'MENTOR';
 
   /* ── Streak color ── */
   const streakColor = streak >= 30
@@ -297,28 +293,21 @@ export default function AgriBuddy() {
     const d = pendingDataRef.current;
     const items: ConfirmItem[] = [];
 
-    // 場所（常に表示、空なら「場所未定」）
+    // マルチ場所: per_locationが存在すれば場所ごとにadmin_logアイテムを生成
+    if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
+      for (const pl of d.per_location) {
+        const loc = pl.location || '場所未定';
+        const adminText = pl.admin_log || '';
+        items.push({ key: `admin_log_${loc}`, label: loc, value: adminText });
+      }
+      return items;
+    }
+
+    // シングル場所: 1つのadmin_logアイテム
     const loc = normalizeLocationName(locRef.current) || locRef.current;
-    items.push({ key: 'location', label: '場所', value: loc || '場所未定' });
-
-    if (d.ocr_date) items.push({ key: 'ocr_date', label: '日付', value: d.ocr_date });
-    items.push({ key: 'work_log', label: '作業内容', value: d.work_log || '' });
-    const hd = d.house_data as HouseData | null | undefined;
-    items.push({ key: 'max_temp', label: '最高気温', value: hd?.max_temp != null ? `${hd.max_temp}℃` : '' });
-    items.push({ key: 'min_temp', label: '最低気温', value: hd?.min_temp != null ? `${hd.min_temp}℃` : '' });
-    items.push({ key: 'humidity', label: '湿度', value: hd?.humidity != null ? `${hd.humidity}%` : '' });
-    items.push({ key: 'fertilizer', label: '肥料', value: d.fertilizer || '' });
-    items.push({ key: 'pest_status', label: '病害虫', value: d.pest_status || '' });
-    items.push({ key: 'harvest_amount', label: '収穫', value: d.harvest_amount || '' });
-    items.push({ key: 'material_cost', label: '資材費', value: d.material_cost || '' });
-    items.push({ key: 'fuel_cost', label: '燃料費', value: d.fuel_cost || '' });
-    items.push({ key: 'work_duration', label: '作業時間', value: d.work_duration || '' });
-    if (d.plant_status && d.plant_status !== '良好') items.push({ key: 'plant_status', label: '所見', value: d.plant_status });
-
-    // 末尾: 日誌テキスト (admin_log)
     const slots = buildSlotsFromPending(d);
     const adminText = d.admin_log || generateAdminLog(slots, loc);
-    items.push({ key: 'admin_log', label: '日誌テキスト', value: adminText });
+    items.push({ key: 'admin_log', label: loc || '営農日誌', value: adminText });
 
     return items;
   }, []);
@@ -342,10 +331,8 @@ export default function AgriBuddy() {
 
       const items = buildConfirmItems();
 
-      // 空チェック強化: admin_log/raw_transcriptのみで実データなしの場合もIDLEへ
-      const hasRealData = items.some(it =>
-        it.key !== 'admin_log' && it.key !== 'raw_transcript' && it.value
-      );
+      // 空チェック: admin_logが空なら記録データなし
+      const hasRealData = items.some(it => it.value.trim());
       if (items.length === 0 || !hasRealData) {
         setPhase('IDLE');
         speak('きろくするデータがありませんでした。もういちどはじめてください。');
@@ -430,48 +417,7 @@ export default function AgriBuddy() {
     setOcrLoading(false);
   }, [showConfirmScreen, clr]);
 
-  /* ── AI admin_log fetch + debounced regeneration ── */
   const adminLogDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const adminLogFetchingRef = useRef(false);
-
-  const fetchAdminLogFromAI = useCallback(async (items: ConfirmItem[]): Promise<string | null> => {
-    try {
-      const res = await fetch('/api/admin-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: items.filter(i =>
-            i.key !== 'admin_log' && i.key !== 'raw_transcript'
-            && i.value && i.value.trim() && i.value !== '場所未定'
-          ),
-        }),
-      });
-      const data = await res.json();
-      return data.admin_log || null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const regenerateAdminLogWithAI = useCallback(async (items: ConfirmItem[]) => {
-    adminLogFetchingRef.current = true;
-    try {
-      const adminLog = await fetchAdminLogFromAI(items);
-      if (adminLog) {
-        setConfirmItems(prev => prev.map(it => it.key === 'admin_log' ? { ...it, value: adminLog } : it));
-      }
-    } finally {
-      adminLogFetchingRef.current = false;
-    }
-  }, [fetchAdminLogFromAI]);
-
-  // CONFIRM進入時にGemini admin_log自動生成（編集なしでもGemini版を保証）
-  useEffect(() => {
-    if (phase === 'CONFIRM' && confirmItems.length > 0 && !adminLogFetchingRef.current) {
-      regenerateAdminLogWithAI(confirmItems);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase]);
 
   /* ── Save from Confirm Screen ── */
   const saveFromConfirm = useCallback(async () => {
@@ -480,101 +426,75 @@ export default function AgriBuddy() {
     invalidateRecogCache();
     clr();
     window.speechSynthesis?.cancel();
-    // debounce待機中 OR fetch in-flight中のいずれかで待機
-    const needsAdminLogSync = !!adminLogDebounceRef.current || adminLogFetchingRef.current;
     if (adminLogDebounceRef.current) { clearTimeout(adminLogDebounceRef.current); adminLogDebounceRef.current = null; }
     const d = pendingDataRef.current;
+    const dateStr = d.ocr_date || new Date().toISOString().split('T')[0];
 
-    for (const item of confirmItems) {
-      const raw = item.value;
-      switch (item.key) {
-        case 'work_log': d.work_log = raw; break;
-        case 'max_temp': {
-          const n = parseFloat(raw);
-          if (!isNaN(n)) {
-            if (!d.house_data) d.house_data = { max_temp: null, min_temp: null, humidity: null };
-            d.house_data.max_temp = n;
-          }
-          break;
-        }
-        case 'min_temp': {
-          const n = parseFloat(raw);
-          if (!isNaN(n)) {
-            if (!d.house_data) d.house_data = { max_temp: null, min_temp: null, humidity: null };
-            d.house_data.min_temp = n;
-          }
-          break;
-        }
-        case 'humidity': {
-          const n = parseFloat(raw);
-          if (!isNaN(n)) {
-            if (!d.house_data) d.house_data = { max_temp: null, min_temp: null, humidity: null };
-            d.house_data.humidity = n;
-          }
-          break;
-        }
-        case 'fertilizer': d.fertilizer = raw; break;
-        case 'pest_status': d.pest_status = raw; break;
-        case 'harvest_amount': d.harvest_amount = raw; break;
-        case 'material_cost': d.material_cost = raw; break;
-        case 'fuel_cost': d.fuel_cost = raw; break;
-        case 'work_duration': d.work_duration = raw; break;
-        case 'plant_status': d.plant_status = raw; break;
-        case 'ocr_date': d.ocr_date = raw; break;
-        case 'raw_transcript': d.raw_transcript = raw; break;
-        case 'admin_log': d.admin_log = raw; break;
-        case 'location': {
-          const normalized = normalizeLocationName(raw) || raw;
-          setCurLoc(normalized);
-          if (normalized && normalized !== '場所未定') {
-            addLocation(normalized, raw !== normalized ? raw : undefined);
-            setLocationOptions(getLocationNames());
-          }
-          break;
+    // マルチ場所: per_locationの各要素+confirmItemsのtextarea値でLocalRecordを生成
+    if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
+      for (const pl of d.per_location) {
+        const loc = pl.location || '';
+        const confirmItem = confirmItems.find(it => it.key === `admin_log_${loc}`);
+        const adminText = confirmItem?.value || pl.admin_log || '';
+        const locMaster = findLocationByName(loc);
+        const slots = buildSlotsFromPending(pl);
+        const conf = calcConfidence(slots);
+        const rec: LocalRecord = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          date: dateStr, location: loc,
+          house_data: pl.house_data || null, work_log: pl.work_log || '',
+          plant_status: pl.plant_status || '良好',
+          advice: pl.advice || generateAdvice(slots, conf),
+          admin_log: adminText, fertilizer: pl.fertilizer || '',
+          pest_status: pl.pest_status || '', harvest_amount: pl.harvest_amount || '',
+          material_cost: pl.material_cost || '', work_duration: pl.work_duration || '',
+          fuel_cost: pl.fuel_cost || '',
+          strategic_advice: pl.strategic_advice || generateStrategicAdvice(slots),
+          pesticide_detail: pl.pesticide_detail || '',
+          photo_count: 0,
+          raw_transcript: d.raw_transcript || undefined,
+          location_id: locMaster?.id,
+          synced: false, timestamp: Date.now(),
+        };
+        saveRecLS(rec);
+        if (loc) {
+          addLocation(loc);
+          saveSession({ location: loc, work: pl.work_log || '', date: dateStr });
         }
       }
-    }
-
-    const loc = locRef.current;
-    const profit = calculateProfitPreview(d);
-
-    const slots = buildSlotsFromPending(d);
-    const conf = calcConfidence(slots);
-    const adviceText = d.advice || generateAdvice(slots, conf);
-    const strategicText = d.strategic_advice || generateStrategicAdvice(slots);
-
-    // admin_log同期保証: debounce待機中 or fetch中なら同期的にGemini版を取得
-    let adminText: string;
-    if (needsAdminLogSync) {
-      setSaving(true);
-      const aiLog = await fetchAdminLogFromAI(confirmItems);
-      adminText = aiLog
-        || confirmItems.find(it => it.key === 'admin_log')?.value
-        || generateAdminLog(slots, loc);
-      setSaving(false);
+      setPendSync(p => p + d.per_location.length);
     } else {
-      const confirmAdminLog = confirmItems.find(it => it.key === 'admin_log')?.value;
-      adminText = confirmAdminLog || d.admin_log || generateAdminLog(slots, loc);
+      // シングル場所
+      const loc = locRef.current;
+      const confirmItem = confirmItems.find(it => it.key === 'admin_log');
+      const slots = buildSlotsFromPending(d);
+      const conf = calcConfidence(slots);
+      const adviceText = d.advice || generateAdvice(slots, conf);
+      const strategicText = d.strategic_advice || generateStrategicAdvice(slots);
+      const adminText = confirmItem?.value || d.admin_log || generateAdminLog(slots, loc);
+      const profit = calculateProfitPreview(d);
+      const locMaster = findLocationByName(loc);
+      const rec: LocalRecord = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        date: dateStr, location: loc,
+        house_data: d.house_data || null, work_log: d.work_log || '',
+        plant_status: d.plant_status || '良好', advice: adviceText,
+        admin_log: adminText, fertilizer: d.fertilizer || '',
+        pest_status: d.pest_status || '', harvest_amount: d.harvest_amount || '',
+        material_cost: d.material_cost || '', work_duration: d.work_duration || '',
+        fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
+        pesticide_detail: d.pesticide_detail || '',
+        photo_count: photoCount, estimated_profit: profit.total,
+        raw_transcript: d.raw_transcript || undefined,
+        location_id: locMaster?.id,
+        synced: false, timestamp: Date.now(),
+      };
+      saveRecLS(rec); setPendSync(p => p + 1);
+      saveSession({ location: loc, work: d.work_log || '', date: dateStr });
+      updateMediaRecordId(pendingMediaId, rec.id).catch(() => {});
     }
 
-    const locMaster = findLocationByName(loc);
-    const rec: LocalRecord = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      date: pendingDataRef.current.ocr_date || new Date().toISOString().split('T')[0], location: loc,
-      house_data: d.house_data || null, work_log: d.work_log || '',
-      plant_status: d.plant_status || '良好', advice: adviceText,
-      admin_log: adminText, fertilizer: d.fertilizer || '',
-      pest_status: d.pest_status || '', harvest_amount: d.harvest_amount || '',
-      material_cost: d.material_cost || '', work_duration: d.work_duration || '',
-      fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
-      photo_count: photoCount, estimated_profit: profit.total,
-      raw_transcript: d.raw_transcript || undefined,
-      location_id: locMaster?.id,
-      synced: false, timestamp: Date.now(),
-    };
-    saveRecLS(rec); setPendSync(p => p + 1);
-    saveSession({ location: loc, work: d.work_log || '', date: rec.date });
-    updateMediaRecordId(pendingMediaId, rec.id).catch(() => {});
+    setLocationOptions(getLocationNames());
     setHistVer(v => v + 1);
     setPhotoCount(0);
     setConfirmItems([]);
@@ -634,6 +554,7 @@ export default function AgriBuddy() {
       return;
     }
 
+    const profit = calculateProfitPreview(pendingDataRef.current);
     setCelebrationProfit(profit.total);
     setShowCelebration(true);
     setTimeout(() => setShowCelebration(false), 5000);
@@ -655,96 +576,12 @@ export default function AgriBuddy() {
     }
     if (navigator.onLine) setTimeout(syncRecs, 500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [confirmItems, photoCount, syncRecs, pendingMediaId, clr, fetchAdminLogFromAI]);
+  }, [confirmItems, photoCount, syncRecs, pendingMediaId, clr]);
 
   /* ── Update confirm item ── */
   const updateConfirmItem = useCallback((key: string, val: string) => {
-    setConfirmItems(prev => {
-      const updated = prev.map(it => it.key === key ? { ...it, value: val } : it);
-      // admin_log直接編集: デバウンスキャンセル（ユーザーの手動上書きを尊重）
-      if (key === 'admin_log') {
-        if (adminLogDebounceRef.current) { clearTimeout(adminLogDebounceRef.current); adminLogDebounceRef.current = null; }
-        return updated;
-      }
-      if (key === 'raw_transcript') return updated;
-      // スロットまたはlocation編集時: 即座にローカル版で仮更新
-      const loc = updated.find(it => it.key === 'location')?.value || '';
-      const slots = buildSlotsFromConfirmItems(updated);
-      const newLog = generateAdminLog(slots, loc === '場所未定' ? '' : loc);
-      const withLocalLog = updated.map(it => it.key === 'admin_log' ? { ...it, value: newLog } : it);
-      // 1.5秒デバウンスでGemini品質版に差し替え
-      if (adminLogDebounceRef.current) clearTimeout(adminLogDebounceRef.current);
-      adminLogDebounceRef.current = setTimeout(() => { regenerateAdminLogWithAI(withLocalLog); }, 1500);
-      return withLocalLog;
-    });
-  }, [regenerateAdminLogWithAI]);
-
-  /* ── Voice Correction on CONFIRM ── */
-  const handleVoiceCorrection = useCallback(async (text: string) => {
-    try {
-      setCorrectionTranscript('修正を解析中...');
-      const res = await fetch('/api/voice-correct', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, currentItems: confirmItems }),
-      });
-      const data = await res.json();
-      if (data.corrections && data.corrections.length > 0) {
-        for (const c of data.corrections) updateConfirmItem(c.key, c.value);
-        setCorrectionTranscript('');
-        speak('修正しました。');
-        return;
-      }
-      // Gemini成功だが修正候補なし
-      setCorrectionTranscript('');
-      speak('どの項目を変更するか分かりませんでした。もう一度お試しください。');
-    } catch {
-      setCorrectionTranscript('');
-      speak('修正の解析に失敗しました。直接タップして編集してください。');
-    }
-  }, [updateConfirmItem, confirmItems]);
-
-  const startVoiceCorrection = useCallback(() => {
-    setCorrectionTranscript('');
-    setCorrectionListening(true);
-    try {
-      const r = createRecog();
-      if (!r) { setCorrectionListening(false); return; }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      r.onresult = (e: any) => {
-        let t = '';
-        for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-        t = correctAgriTerms(t);
-        setCorrectionTranscript(t);
-      };
-      r.onerror = () => {};
-      r.onend = () => {
-        setCorrectionListening(false);
-        const text = (r as unknown as { _lastText?: string })._lastText || '';
-        // Need to capture final text from state — use a small trick
-        // Actually, use the transcript we accumulated
-      };
-      // Wrap onresult to also capture for onend
-      const origOnResult = r.onresult;
-      let finalText = '';
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      r.onresult = (e: any) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (origOnResult as any)?.(e);
-        let t = '';
-        for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-        finalText = correctAgriTerms(t);
-      };
-      r.onend = () => {
-        setCorrectionListening(false);
-        if (finalText.trim()) handleVoiceCorrection(finalText.trim());
-      };
-      r.start();
-      setTimeout(() => { try { r.stop(); } catch {} }, MAX_LISTEN_MS);
-    } catch {
-      setCorrectionListening(false);
-    }
-  }, [handleVoiceCorrection]);
+    setConfirmItems(prev => prev.map(it => it.key === key ? { ...it, value: val } : it));
+  }, []);
 
   /* ── Start Listening ── */
   const startListen = useCallback(() => {
@@ -841,7 +678,7 @@ export default function AgriBuddy() {
               recogRef.current = r2;
             } catch {
               recogRef.current = null;
-              if (spoke) setPhase('REVIEWING');
+              if (spoke) sasRef.current();
             }
           }, 300);
           return;
@@ -849,7 +686,7 @@ export default function AgriBuddy() {
 
         // ユーザーが明示的に停止
         clr();
-        if (spoke) { setPhase('REVIEWING'); }
+        if (spoke) { sasRef.current(); }
         else { setPhase('IDLE'); }
       };
       resultOffsetRef.current = 0;
@@ -883,18 +720,6 @@ export default function AgriBuddy() {
     }
   }, [clr]);
 
-  /* ── Confirm transcript (REVIEWING → process) ── */
-  const confirmTranscript = useCallback(() => {
-    sasRef.current();
-  }, []);
-
-  /* ── Retry listening (REVIEWING → re-record) ── */
-  const retryListen = useCallback(() => {
-    chunksRef.current = '';
-    setTranscript('');
-    startListen();
-  }, [startListen]);
-
   /* ── Advance Follow-Up ── */
   const advanceFollowUp = useCallback(() => {
     // iOS安定化: 質問遷移前にrecogを確実に停止
@@ -903,51 +728,45 @@ export default function AgriBuddy() {
     }
     const queue = followUpQueueRef.current;
 
-    while (followUpIndexRef.current < queue.length) {
-      const step = queue[followUpIndexRef.current];
-      const d = pendingDataRef.current;
-      const filled =
-        (step === 'WORK' && d.work_log) ||
-        (step === 'HOUSE_TEMP' && d.house_data) ||
-        (step === 'FERTILIZER' && d.fertilizer) ||
-        (step === 'PEST' && d.pest_status) ||
-        (step === 'HARVEST' && d.harvest_amount) ||
-        (step === 'COST' && (d.material_cost || d.fuel_cost)) ||
-        (step === 'DURATION' && d.work_duration);
-      if (filled) {
-        followUpIndexRef.current++;
-      } else {
-        break;
-      }
-    }
-
     if (followUpIndexRef.current >= queue.length) {
-      // 全問完了: persistent recog停止
+      // 全問完了: persistent recog停止 → 2回目API呼び出し
       persistentRecogRef.current = false;
       const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
       setFollowUpInfo({ label: '完了', current: queue.length, total: queue.length });
-      setPhase('FOLLOW_UP');
-      let transitioned = false;
-      const doTransition = () => {
-        if (transitioned) return;
-        transitioned = true;
+      setPhase('THINKING');
+
+      // 元の入力+追加回答を統合して2回目のAPI呼び出し
+      (async () => {
+        try {
+          const allText = rawTranscriptRef.current.join('\n');
+          const locations = pendingDataRef.current.locations || selectedLocations;
+          const res = await fetch('/api/diagnose', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: allText,
+              locations: locations.length > 0 ? locations : undefined,
+              location: locations[0] || locRef.current,
+              outdoor,
+              knownLocations: getLocationNames(),
+            }),
+          });
+          const d: ApiResponse = await res.json();
+          if (!d.error) {
+            pendingDataRef.current = { ...pendingDataRef.current, ...d };
+          }
+        } catch {
+          // API失敗時は既存データで進む
+        }
         showConfirmScreen();
-      };
-      speak('バッチリです！今日の記録を保存しますね！').then(() => setTimeout(doTransition, 500));
-      setTimeout(doTransition, 3000); // safety fallback
+      })();
       return;
     }
     const step = queue[followUpIndexRef.current];
 
-    emptyRetryRef.current = 0; // 新しい質問ごとにリトライカウンタをリセット
+    emptyRetryRef.current = 0;
 
-    // PHOTO step: persistent recog停止（音声入力不要）
-    if (step === 'PHOTO') {
-      persistentRecogRef.current = false;
-      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
-    }
-
-    const questions = FOLLOW_UP_QUESTIONS[step];
+    const questions = GUIDED_QUESTIONS[step];
     const question = questions[Math.floor(Math.random() * questions.length)];
     setFollowUpInfo({ label: questions[0], current: followUpIndexRef.current + 1, total: queue.length });
 
@@ -957,59 +776,46 @@ export default function AgriBuddy() {
     if (isFirstQuestionRef.current) {
       isFirstQuestionRef.current = false;
       setPhase('FOLLOW_UP');
-      if (step !== 'PHOTO') {
-        // 非iOS: persistent muted recog並行起動（バナー抑制）
-        // iOS: TTS完了までrecog起動しない（audio session排他）
-        if (!isIOS) {
-          persistentRecogRef.current = true;
-          mutedRef.current = true;
-        }
+      // 非iOS: persistent muted recog並行起動（バナー抑制）
+      if (!isIOS) {
+        persistentRecogRef.current = true;
+        mutedRef.current = true;
       }
-      // 最初の質問（ナラティブ「今日のこと〜」直後なので挨拶不要）
       const ttsP = speak(question);
-      if (step !== 'PHOTO') {
-        if (!isIOS) setTimeout(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); }, 100);
-        ttsP.then(() => {
-          if (!followUpActiveRef.current) return;
-          mutedRef.current = false;  // TTS完了→明示的unmute（recog死亡時の保険）
-          startListen();
-        });
-      }
+      if (!isIOS) setTimeout(() => { if (followUpActiveRef.current && !recogRef.current) startListen(); }, 100);
+      ttsP.then(() => {
+        if (!followUpActiveRef.current) return;
+        mutedRef.current = false;
+        startListen();
+      });
     } else {
       const breathMs = BREATHING_MS;
       setPhase('BREATHING');
-      mutedRef.current = true; // BREATHING+TTS中はミュート（persistent recog用。iOSではrecog無いので無影響）
+      mutedRef.current = true;
       setTimeout(() => {
         if (!followUpActiveRef.current) return;
         setTranscript('');
         chunksRef.current = '';
         setPhase('FOLLOW_UP');
         const ttsP = speak(question);
-        if (step !== 'PHOTO') {
-          ttsP.then(() => {
-            if (!followUpActiveRef.current) return;
-            mutedRef.current = false;
-            startListen();
-          });
-        }
+        ttsP.then(() => {
+          if (!followUpActiveRef.current) return;
+          mutedRef.current = false;
+          startListen();
+        });
       }, breathMs);
     }
-  }, [startListen, showConfirmScreen]);
+  }, [startListen, showConfirmScreen, outdoor, selectedLocations]);
 
   useEffect(() => { advanceFollowUpRef.current = advanceFollowUp; }, [advanceFollowUp]);
 
-  /* ── Fallback queue builder (Gemini missing_questions absent) ── */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const buildFallbackQueue = (d: Record<string, any>): FollowUpStep[] => {
-    const q: FollowUpStep[] = [];
-    if (!d.work_log) q.push('WORK');
-    if (!d.house_data) q.push('HOUSE_TEMP');
-    if (!d.fertilizer) q.push('FERTILIZER');
-    if (!d.pest_status) q.push('PEST');
-    if (!d.harvest_amount) q.push('HARVEST');
-    if (!d.material_cost && !d.fuel_cost) q.push('COST');
-    if (!d.work_duration) q.push('DURATION');
-    return q;
+  /* ── Map missing_questions to new 3-category follow-up ── */
+  const mapToFollowUp = (mq: string[], hasLocation: boolean): FollowUpStep[] => {
+    const steps: FollowUpStep[] = [];
+    if (!hasLocation) steps.push('LOCATION');
+    if (mq.includes('WORK')) steps.push('WORK');
+    if (mq.includes('FERTILIZER') || mq.includes('PEST')) steps.push('MATERIALS');
+    return steps;
   };
 
   /* ── Stop & Send ── */
@@ -1051,50 +857,23 @@ export default function AgriBuddy() {
         .replace(/\s{2,}/g, ' ').trim();
       const isSkip = !cleaned;
 
-      if (!isSkip && cleaned.length > 0 && cleaned.length <= 2 && (step === 'FERTILIZER' || step === 'PEST')) {
+      if (!isSkip && cleaned.length > 0 && cleaned.length <= 2 && step === 'MATERIALS') {
         setTranscript('もう一度お願いします');
         setPhase('FOLLOW_UP');
         return;
       }
 
-      if (step === 'PHOTO') {
-        if (isSkip) {
-          setTranscript('');
-          followUpIndexRef.current++;
-          advanceFollowUpRef.current();
-          return;
-        }
-        photoWaitingRef.current = true;
-        setTranscript('');
-        return;
-      }
-
+      // 回答をrawTranscriptに蓄積（最終API呼び出しでGeminiが統合抽出）
+      // LOCATION回答のみpendingDataに格納
       if (!isSkip && step) {
         switch (step) {
-          case 'WORK': pendingDataRef.current.work_log = cleaned; break;
-          case 'HOUSE_TEMP': {
-            const tempMatch = cleaned.match(/(\d+)\s*[度℃]/g);
-            if (tempMatch) {
-              const nums = tempMatch.map(t => parseInt(t.replace(/[^\d]/g, ''))).filter(isValidTemp);
-              if (nums.length >= 2) {
-                pendingDataRef.current.house_data = { max_temp: Math.max(...nums), min_temp: Math.min(...nums), humidity: null };
-              } else if (nums.length === 1) {
-                pendingDataRef.current.house_data = { max_temp: nums[0], min_temp: null, humidity: null };
-              }
-            } else {
-              const m = cleaned.match(/(\d+)/);
-              const bare = m ? parseInt(m[1], 10) : NaN;
-              if (!isNaN(bare) && isValidTemp(bare)) {
-                pendingDataRef.current.house_data = { max_temp: bare, min_temp: null, humidity: null };
-              }
-            }
+          case 'LOCATION':
+            pendingDataRef.current.locations = [cleaned];
             break;
-          }
-          case 'FERTILIZER': pendingDataRef.current.fertilizer = cleaned; break;
-          case 'PEST': pendingDataRef.current.pest_status = cleaned; break;
-          case 'HARVEST': pendingDataRef.current.harvest_amount = cleaned; break;
-          case 'COST': pendingDataRef.current.material_cost = cleaned; break;
-          case 'DURATION': pendingDataRef.current.work_duration = cleaned; break;
+          case 'WORK':
+          case 'MATERIALS':
+            // rawTranscriptRefに蓄積済み（上のpush）、個別格納不要
+            break;
         }
       }
 
@@ -1155,7 +934,12 @@ export default function AgriBuddy() {
     try {
       const res = await fetch('/api/diagnose', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, context: uc, location: locOvr || locRef.current, outdoor, knownLocations: getLocationNames() }),
+        body: JSON.stringify({
+          text, context: uc,
+          location: locOvr || locRef.current,
+          locations: selectedLocations.length > 0 ? selectedLocations : undefined,
+          outdoor, knownLocations: getLocationNames(),
+        }),
       });
       const d: ApiResponse = await res.json();
       if (d.error) { setAiReply(d.error); setPhase('IDLE'); return; }
@@ -1201,17 +985,14 @@ export default function AgriBuddy() {
 
       try {
         pendingDataRef.current = { ...d };
+        if (selectedLocations.length > 0) {
+          pendingDataRef.current.locations = [...selectedLocations];
+        }
 
-        // Geminiが判定した不足フィールドを使用（フォールバック: 既存falsyチェック）
-        const VALID_STEPS = new Set<FollowUpStep>(['WORK','HOUSE_TEMP','FERTILIZER','PEST','HARVEST','COST','DURATION']);
-        const geminiQueue: FollowUpStep[] = Array.isArray(d.missing_questions)
-          ? (d.missing_questions as string[]).filter((q): q is FollowUpStep => VALID_STEPS.has(q as FollowUpStep))
-          : buildFallbackQueue(d);
-
-        // PHOTOはmissing_questionsとは独立。不足項目があれば末尾に追加
-        const queue: FollowUpStep[] = geminiQueue.length > 0
-          ? [...geminiQueue, 'PHOTO']
-          : [];
+        // missing_questionsを新3カテゴリにマッピング
+        const hasLocation = !!(selectedLocations.length > 0 || d.new_location || locRef.current);
+        const mq = Array.isArray(d.missing_questions) ? d.missing_questions as string[] : [];
+        const queue = mapToFollowUp(mq, hasLocation);
 
         if (queue.length > 0) {
           followUpActiveRef.current = true;
@@ -1220,7 +1001,7 @@ export default function AgriBuddy() {
           isFirstQuestionRef.current = true;
           advanceFollowUpRef.current();
         } else {
-          // 全項目埋まり → follow-upスキップ、CONFIRM直行
+          // 全項目十分 → follow-upスキップ、CONFIRM直行
           speak('バッチリ全部入ってます！確認画面へいきますね。');
           showConfirmScreen();
         }
@@ -1233,7 +1014,7 @@ export default function AgriBuddy() {
       setAiReply('通信に失敗しました。ネットワークを確認して、もう一度話しかけてください。'); setPhase('IDLE');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clr, syncRecs, photoCount, showConfirmScreen, startListen]);
+  }, [clr, syncRecs, photoCount, showConfirmScreen, startListen, selectedLocations]);
 
   useEffect(() => { sasRef.current = stopAndSend; }, [stopAndSend]);
 
@@ -1289,6 +1070,9 @@ export default function AgriBuddy() {
     photoWaitingRef.current = false;
     emptyRetryRef.current = 0;
     pendingDataRef.current = {};
+    if (selectedLocations.length > 0) {
+      pendingDataRef.current.locations = [...selectedLocations];
+    }
     setTranscript(''); setAiReply(''); setConv([]); setProfitPreview(null);
     setPhotoCount(0); setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
     setBump(null); setConfidence(null); setConfirmItems([]); setFollowUpInfo(null);
@@ -1301,7 +1085,7 @@ export default function AgriBuddy() {
     followUpActiveRef.current = false;
     speak('今日のこと、なんでも聞かせてください。').then(() => startListen());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clr, startListen]);
+  }, [clr, startListen, selectedLocations]);
 
   /* ── Begin Session ── */
   const begin = useCallback(() => {
@@ -1340,9 +1124,9 @@ export default function AgriBuddy() {
     setView('record');
   };
 
-  const onPtrDown = useCallback(() => { if (phase !== 'THINKING' && phase !== 'CONFIRM' && phase !== 'BREATHING' && phase !== 'MENTOR' && phase !== 'REVIEWING') { ptrRef.current = Date.now(); lpRef.current = false; } }, [phase]);
+  const onPtrDown = useCallback(() => { if (phase !== 'THINKING' && phase !== 'CONFIRM' && phase !== 'BREATHING' && phase !== 'MENTOR') { ptrRef.current = Date.now(); lpRef.current = false; } }, [phase]);
   const onPtrUp = useCallback(() => {
-    if (phase === 'THINKING' || phase === 'CONFIRM' || phase === 'BREATHING' || phase === 'MENTOR' || phase === 'REVIEWING') return;
+    if (phase === 'THINKING' || phase === 'CONFIRM' || phase === 'BREATHING' || phase === 'MENTOR') return;
     if (Date.now() - ptrRef.current < 200) {
       if (phase === 'LISTENING') {
         if (persistentRecogRef.current && followUpActiveRef.current) {
@@ -1443,12 +1227,7 @@ export default function AgriBuddy() {
             <ConfirmScreen
               confirmItems={confirmItems} onUpdate={updateConfirmItem}
               onSave={saveFromConfirm} onReset={reset}
-              onVoiceCorrection={startVoiceCorrection}
-              isListeningCorrection={correctionListening}
-              correctionTranscript={correctionTranscript}
               saving={saving}
-              locationOptions={locationOptions}
-              isNewLocation={isNewLocation}
             />
           )}
 
@@ -1599,37 +1378,6 @@ export default function AgriBuddy() {
                 </div>
               )}
 
-              {phase === 'REVIEWING' && !followUpActiveRef.current && (
-                <div className="w-full mb-4 fade-up">
-                  <div className={`p-5 rounded-2xl ${GLASS}`}>
-                    {transcript ? (
-                      <>
-                        <p className="text-sm font-medium text-stone-500 mb-2">聞き取り内容</p>
-                        <p className="text-xl font-bold text-stone-900 mb-4 leading-relaxed">{transcript}</p>
-                        <div className="flex gap-3">
-                          <button onClick={confirmTranscript}
-                            className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-xl font-bold shadow-lg btn-press flex items-center justify-center gap-2">
-                            <Check className="w-6 h-6" /> 確定
-                          </button>
-                          <button onClick={retryListen}
-                            className="py-4 px-6 rounded-2xl bg-stone-200/80 text-stone-600 text-xl font-bold btn-press flex items-center justify-center gap-2">
-                            <RotateCcw className="w-5 h-5" /> やり直し
-                          </button>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-xl font-bold text-stone-700 mb-4">聞き取れませんでした</p>
-                        <button onClick={retryListen}
-                          className="w-full py-4 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-xl font-bold shadow-lg btn-press flex items-center justify-center gap-2">
-                          <RotateCcw className="w-5 h-5" /> もう一度
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
               {phase === 'LISTENING' && liveChips.length > 0 && (
                 <div className="flex flex-wrap gap-2 mb-5 justify-center">
                   {liveChips.map((c, i) => (
@@ -1657,30 +1405,41 @@ export default function AgriBuddy() {
                 </div>
               )}
 
-              {/* ═══ MIC / CAMERA BUTTON (Record View) ═══ */}
-              {(() => {
-                const isPhotoStep = followUpInfo !== null
-                  && followUpQueueRef.current[followUpIndexRef.current] === 'PHOTO'
-                  && (phase === 'FOLLOW_UP' || phase === 'LISTENING');
-                return isPhotoStep ? (
-                  <>
-                    <button
-                      onClick={() => photoRef.current?.click()}
-                      className="relative z-10 rounded-full flex items-center justify-center w-[24vh] h-[24vh] max-w-64 max-h-64 transition-all duration-300 select-none touch-none btn-press bg-gradient-to-br from-sky-500 to-blue-600 shadow-[0_8px_50px_rgba(14,165,233,0.5)]"
-                      aria-label="写真を添付"
-                    >
-                      <Camera className="w-20 h-20 text-white" />
-                    </button>
-                    <p className="mt-4 text-xl font-bold text-white/70">写真を添付</p>
-                  </>
-                ) : (
-                  <>
-                    <div className="relative">
-                      {(phase === 'LISTENING' || phase === 'FOLLOW_UP') && <div className="absolute inset-0 rounded-full bg-amber-400/30 listening-ring" />}
-                      <button
+              {/* ═══ MIC BUTTON (Record View) ═══ */}
+              <>
+                {/* ── 場所チェックボックス（IDLE時のみ） ── */}
+                {phase === 'IDLE' && locationOptions.length > 0 && (
+                  <div className={`w-full mb-6 p-4 rounded-2xl ${CARD_FLAT}`}>
+                    <p className="text-sm font-bold text-stone-500 mb-2">作業場所（複数選択可）</p>
+                    <div className="flex flex-wrap gap-2">
+                      {locationOptions.map(loc => (
+                        <label key={loc} className={`flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer btn-press ${
+                          selectedLocations.includes(loc)
+                            ? 'bg-amber-100 border-amber-400 text-amber-800'
+                            : 'bg-white/60 border-stone-200 text-stone-600'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedLocations.includes(loc)}
+                            onChange={e => {
+                              if (e.target.checked) setSelectedLocations(p => [...p, loc]);
+                              else setSelectedLocations(p => p.filter(l => l !== loc));
+                            }}
+                            className="w-4 h-4 accent-amber-500"
+                          />
+                          <span className="text-base font-bold">{loc}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="relative">
+                  {(phase === 'LISTENING' || phase === 'FOLLOW_UP') && <div className="absolute inset-0 rounded-full bg-amber-400/30 listening-ring" />}
+                  <button
                         onPointerDown={onPtrDown} onPointerUp={onPtrUp}
                         onPointerLeave={() => { if (phase === 'LISTENING' && lpRef.current) stopAndSend(); }}
-                        disabled={phase === 'THINKING' || phase === 'BREATHING' || phase === 'REVIEWING'}
+                        disabled={phase === 'THINKING' || phase === 'BREATHING'}
                         className={`
                           relative z-10 rounded-full flex items-center justify-center
                           w-[24vh] h-[24vh] max-w-64 max-h-64
@@ -1703,58 +1462,37 @@ export default function AgriBuddy() {
                         }`} />
                       </button>
                     </div>
-                    <p className="mt-4 text-xl font-bold text-white/70">
-                      {phase === 'LISTENING' ? '聞いています... タップで止める'
-                        : phase === 'REVIEWING' ? ''
-                        : phase === 'THINKING' ? '考え中...'
-                        : phase === 'BREATHING' ? '準備中...'
-                        : phase === 'FOLLOW_UP' ? '声で答えてください'
-                        : '今日のことを話す'}
-                    </p>
-                  </>
-                );
-              })()}
+                <p className="mt-4 text-xl font-bold text-white/70">
+                  {phase === 'LISTENING' ? '聞いています... タップで止める'
+                    : phase === 'THINKING' ? '考え中...'
+                    : phase === 'BREATHING' ? '準備中...'
+                    : phase === 'FOLLOW_UP' ? '声で答えてください'
+                    : '今日のことを話す'}
+                </p>
+              </>
 
-              {/* Action buttons row */}
-              <div className="mt-4 flex gap-3 w-full">
-                {followUpInfo && followUpQueueRef.current[followUpIndexRef.current] === 'PHOTO' && (
-                  <button onClick={() => photoRef.current?.click()}
-                    className={`flex-1 py-5 rounded-2xl ${CARD_FLAT} flex items-center justify-center gap-2 text-lg font-bold text-stone-700 hover:bg-white/80 btn-press`}>
-                    <Camera className="w-6 h-6" /> 写真
-                  </button>
-                )}
-                <input ref={photoRef} type="file" accept="image/*,video/*" capture="environment" className="hidden"
-                  onChange={async e => {
-                    const files = e.target.files;
-                    if (!files?.length) return;
-                    for (let i = 0; i < Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount); i++) {
-                      const file = files[i];
-                      const mediaType = file.type.startsWith('video') ? 'video' : 'image';
-                      try {
-                        await saveMediaBlob(pendingMediaId, file, mediaType);
-                        setMediaPreview(prev => [...prev, { url: URL.createObjectURL(file), type: mediaType }]);
-                      } catch { /* IDB save failed, count only */ }
-                    }
-                    setPhotoCount(p => p + Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount));
-                    e.target.value = '';
-                    const isPhotoStep = followUpActiveRef.current && followUpQueueRef.current[followUpIndexRef.current] === 'PHOTO';
-                    if (photoWaitingRef.current || isPhotoStep) {
-                      photoWaitingRef.current = false;
-                      followUpIndexRef.current++;
-                      // 音声認識を確実に停止してからCONFIRM遷移（遅延onendによるIDLEリセット防止）
-                      persistentRecogRef.current = false;
-                      const _r = recogRef.current; recogRef.current = null; if (_r) { try { _r.stop(); } catch {} }
-                      window.speechSynthesis?.cancel();
-                      setTimeout(() => showConfirmScreen(), 500);
-                    }
-                  }} />
-                <input ref={ocrInputRef} type="file" accept="image/*" className="hidden"
-                  onChange={e => {
-                    const file = e.target.files?.[0];
-                    if (file) handleOcr(file);
-                    e.target.value = '';
-                  }} />
-              </div>
+              {/* Hidden inputs */}
+              <input ref={photoRef} type="file" accept="image/*,video/*" capture="environment" className="hidden"
+                onChange={async e => {
+                  const files = e.target.files;
+                  if (!files?.length) return;
+                  for (let i = 0; i < Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount); i++) {
+                    const file = files[i];
+                    const mediaType = file.type.startsWith('video') ? 'video' : 'image';
+                    try {
+                      await saveMediaBlob(pendingMediaId, file, mediaType);
+                      setMediaPreview(prev => [...prev, { url: URL.createObjectURL(file), type: mediaType }]);
+                    } catch { /* IDB save failed, count only */ }
+                  }
+                  setPhotoCount(p => p + Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount));
+                  e.target.value = '';
+                }} />
+              <input ref={ocrInputRef} type="file" accept="image/*" className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0];
+                  if (file) handleOcr(file);
+                  e.target.value = '';
+                }} />
 
               {phase === 'IDLE' && (
                 <>
