@@ -508,7 +508,40 @@ export function HistoryView({
                 </div>
               );
             })()}
-            {/* ── admin_log: 青系カード — 位置昇格 ── */}
+            {/* ── house_data: 気温・湿度（ヘッダー部） ── */}
+            {calSelected.house_data && (
+              <div className="flex items-baseline justify-center gap-3 mb-3 flex-wrap">
+                {calSelected.house_data.max_temp != null && (
+                  <div className="text-center">
+                    <p className="text-4xl font-black text-stone-900">{fmtVal(calSelected.house_data.max_temp, '℃')}</p>
+                    <p className="text-base font-bold text-stone-600">最高</p>
+                  </div>
+                )}
+                {calSelected.house_data.max_temp != null && calSelected.house_data.min_temp != null && (
+                  <span className="text-2xl font-bold text-stone-400">/</span>
+                )}
+                {calSelected.house_data.min_temp != null && (
+                  <div className="text-center">
+                    <p className="text-4xl font-black text-stone-900">{fmtVal(calSelected.house_data.min_temp, '℃')}</p>
+                    <p className="text-base font-bold text-stone-600">最低</p>
+                  </div>
+                )}
+                {calSelected.house_data.humidity != null && (
+                  <>
+                    <span className="text-2xl font-bold text-stone-400">|</span>
+                    <div className="text-center">
+                      <p className="text-4xl font-black text-stone-900">{fmtVal(calSelected.house_data.humidity, '%')}</p>
+                      <p className="text-base font-bold text-stone-600">湿度</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+            {/* ── 区切り線: ヘッダー部と本文部の分離 ── */}
+            {calSelected.house_data && (calSelected.admin_log || calSelected.work_log) && (
+              <hr className="border-stone-200/50 my-3" />
+            )}
+            {/* ── admin_log: 青系カード ── */}
             {calSelected.admin_log && (
               <div className="mt-3 p-4 rounded-xl bg-blue-50 border-2 border-blue-300">
                 <p className="text-xl font-black text-blue-800 mb-1 flex items-center gap-1.5">
@@ -533,13 +566,6 @@ export function HistoryView({
                 </div>
               );
             })()}
-            {calSelected.house_data && (
-              <div className="grid grid-cols-3 gap-2 text-center mb-3">
-                <div><p className="text-5xl font-black text-stone-900">{fmtVal(calSelected.house_data.max_temp, '℃')}</p><p className="text-xl font-bold text-stone-600">最高</p></div>
-                <div><p className="text-5xl font-black text-stone-900">{fmtVal(calSelected.house_data.min_temp, '℃')}</p><p className="text-xl font-bold text-stone-600">最低</p></div>
-                <div><p className="text-5xl font-black text-stone-900">{fmtVal(calSelected.house_data.humidity, '%')}</p><p className="text-xl font-bold text-stone-600">湿度</p></div>
-              </div>
-            )}
             <div className="space-y-3 text-2xl">
               {!calSelected.admin_log && calSelected.work_log && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">作業:</b> {calSelected.work_log}</span></div>}
               {calSelected.work_duration && <div><span className="text-stone-900"><b className="text-xl font-bold text-stone-600">時間:</b> {calSelected.work_duration}</span></div>}

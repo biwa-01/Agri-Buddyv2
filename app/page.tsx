@@ -1057,7 +1057,8 @@ export default function AgriBuddy() {
                 pendingDataRef.current.house_data = { max_temp: nums[0], min_temp: null, humidity: null };
               }
             } else {
-              const bare = parseInt(cleaned);
+              const m = cleaned.match(/(\d+)/);
+              const bare = m ? parseInt(m[1], 10) : NaN;
               if (!isNaN(bare) && isValidTemp(bare)) {
                 pendingDataRef.current.house_data = { max_temp: bare, min_temp: null, humidity: null };
               }

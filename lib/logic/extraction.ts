@@ -36,7 +36,12 @@ export function buildRecordChips(rec: LocalRecord): { label: string; color: stri
       if (w.p.test(rec.work_log)) chips.push({ label: w.l, color: 'amber' });
     }
   }
-  if (rec.house_data?.max_temp != null) chips.push({ label: `${rec.house_data.max_temp}℃`, color: 'blue' });
+  if (rec.house_data?.max_temp != null || rec.house_data?.min_temp != null) {
+    const parts: string[] = [];
+    if (rec.house_data?.max_temp != null) parts.push(`${rec.house_data.max_temp}℃`);
+    if (rec.house_data?.min_temp != null) parts.push(`${rec.house_data.min_temp}℃`);
+    chips.push({ label: parts.join(' / '), color: 'blue' });
+  }
   if (rec.harvest_amount && !isNegativeInput(rec.harvest_amount))
     chips.push({ label: `収穫 ${rec.harvest_amount}`, color: 'green' });
   if (rec.fertilizer && !isNegativeInput(rec.fertilizer))

@@ -44,7 +44,7 @@ export function generateOfficialReport(records: LocalRecord[], startYear: number
   rpt += `─────────────────────────────\n`;
   const workCounts: Record<string, number> = {};
   rangeRecs.forEach(r => {
-    if (r.work_log) r.work_log.split('・').forEach(w => { workCounts[w] = (workCounts[w] || 0) + 1; });
+    if (r.work_log) String(r.work_log).split('・').forEach(w => { workCounts[w] = (workCounts[w] || 0) + 1; });
   });
   rpt += `  作業種別          回数\n`;
   Object.entries(workCounts).forEach(([w, c]) => {
