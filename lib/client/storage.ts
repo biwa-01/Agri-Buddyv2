@@ -12,6 +12,10 @@ export function loadRecs(): LocalRecord[] {
       catch { return false; }
     }).map(r => ({
       ...r,
+      id: String(r.id ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+      date: typeof r.date === 'number'
+        ? new Date(r.date).toISOString().split('T')[0]
+        : String(r.date ?? new Date().toISOString().split('T')[0]),
       location: r.location ?? '',
       work_log: r.work_log ?? '',
       plant_status: r.plant_status ?? '良好',

@@ -9,7 +9,8 @@
 export function Linkify({ text }: { text: string }) {
   // Split by **bold** markers and URLs
   const re = /(\*\*[^*]+\*\*|https?:\/\/[^\s）)]+)/g;
-  const parts = text.split(re);
+  const safeText = typeof text === 'string' ? text : String(text ?? '');
+  const parts = safeText.split(re);
 
   return (
     <>

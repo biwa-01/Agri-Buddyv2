@@ -8,7 +8,7 @@ export function generateOfficialReport(records: LocalRecord[], startYear: number
   const rangeRecs = records.filter(r => {
     const d = new Date(r.date);
     return d >= start && d <= end;
-  }).sort((a, b) => a.date.localeCompare(b.date));
+  }).sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
   const periodLabel = months === 1
     ? `${startYear}年${startMonth + 1}月`
