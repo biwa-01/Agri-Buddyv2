@@ -3,6 +3,14 @@ import { SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_MOOD, SK_LOCATIONS, MEDIA_D
 import { isValidTemp, isValidHumidity } from '@/lib/logic/validation';
 import { normalizeLocationName } from '@/lib/logic/extraction';
 
+/* ── helpers ── */
+function normalizeDate(s: string): string {
+  const m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? new Date().toISOString().split('T')[0] : d.toISOString().split('T')[0];
+}
+
 /* ── localStorage ── */
 export function loadRecs(): LocalRecord[] {
   try {
@@ -10,31 +18,36 @@ export function loadRecs(): LocalRecord[] {
     return raw.filter((r): r is LocalRecord => {
       try { return r != null && typeof r === 'object' && 'id' in r && 'date' in r; }
       catch { return false; }
-    }).map(r => ({
-      ...r,
-      id: String(r.id ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
-      date: typeof r.date === 'number'
-        ? new Date(r.date).toISOString().split('T')[0]
-        : String(r.date ?? new Date().toISOString().split('T')[0]),
-      location: String(r.location ?? ''),
-      work_log: String(r.work_log ?? ''),
-      plant_status: String(r.plant_status ?? '良好'),
-      advice: String(r.advice ?? ''),
-      admin_log: String(r.admin_log ?? ''),
-      fertilizer: String(r.fertilizer ?? ''),
-      pest_status: String(r.pest_status ?? ''),
-      harvest_amount: String(r.harvest_amount ?? ''),
-      material_cost: String(r.material_cost ?? ''),
-      work_duration: String(r.work_duration ?? ''),
-      fuel_cost: String(r.fuel_cost ?? ''),
-      strategic_advice: String(r.strategic_advice ?? ''),
-      pesticide_detail: String(r.pesticide_detail ?? ''),
-      photo_count: r.photo_count ?? 0,
-      synced: r.synced ?? false,
-      timestamp: r.timestamp ?? 0,
-      house_data: r.house_data ?? null,
-      estimated_profit: typeof r.estimated_profit === 'number' ? r.estimated_profit : (r.estimated_profit != null ? Number(r.estimated_profit) || undefined : undefined),
-    }));
+    }).flatMap(r => {
+      try {
+        const dateStr = typeof r.date === 'number'
+          ? new Date(r.date).toISOString().split('T')[0]
+          : String(r.date ?? new Date().toISOString().split('T')[0]);
+        return [{
+          ...r,
+          id: String(r.id ?? `legacy-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`),
+          date: normalizeDate(dateStr),
+          location: String(r.location ?? ''),
+          work_log: String(r.work_log ?? ''),
+          plant_status: String(r.plant_status ?? '良好'),
+          advice: String(r.advice ?? ''),
+          admin_log: String(r.admin_log ?? ''),
+          fertilizer: String(r.fertilizer ?? ''),
+          pest_status: String(r.pest_status ?? ''),
+          harvest_amount: String(r.harvest_amount ?? ''),
+          material_cost: String(r.material_cost ?? ''),
+          work_duration: String(r.work_duration ?? ''),
+          fuel_cost: String(r.fuel_cost ?? ''),
+          strategic_advice: String(r.strategic_advice ?? ''),
+          pesticide_detail: String(r.pesticide_detail ?? ''),
+          photo_count: r.photo_count ?? 0,
+          synced: r.synced ?? false,
+          timestamp: r.timestamp ?? 0,
+          house_data: r.house_data ?? null,
+          estimated_profit: typeof r.estimated_profit === 'number' ? r.estimated_profit : (r.estimated_profit != null ? Number(r.estimated_profit) || undefined : undefined),
+        }];
+      } catch { return []; }
+    });
   } catch { return []; }
 }
 export function saveRecLS(r: LocalRecord) { const rs = loadRecs(); rs.push(r); localStorage.setItem(SK_RECORDS, JSON.stringify(rs)); }
@@ -66,7 +79,8 @@ export function sanitizeRecords() {
 /* ── Deep Clean (one-time migration) ── */
 export function deepClean() {
   try {
-    if (localStorage.getItem(SK_DEEP_CLEANED)) return;
+    const CURRENT_CLEAN_VERSION = '2';
+    if (localStorage.getItem(SK_DEEP_CLEANED) === CURRENT_CLEAN_VERSION) return;
     const recs = loadRecs();
     let dirty = false;
     const cleaned = recs.map(r => {
@@ -85,13 +99,14 @@ export function deepClean() {
       return r;
     }).filter(r => {
       const hasData = r.work_log || r.plant_status !== '良好' || r.fertilizer || r.pest_status ||
-        r.harvest_amount || r.material_cost || r.work_duration || r.fuel_cost || r.house_data;
+        r.harvest_amount || r.material_cost || r.work_duration || r.fuel_cost || r.house_data ||
+        r.admin_log || r.raw_transcript;
       const age = Date.now() - (r.timestamp || 0);
       if (!hasData && age > 30 * 24 * 60 * 60 * 1000) { dirty = true; return false; }
       return true;
     });
     if (dirty) localStorage.setItem(SK_RECORDS, JSON.stringify(cleaned));
-    localStorage.setItem(SK_DEEP_CLEANED, '1');
+    localStorage.setItem(SK_DEEP_CLEANED, CURRENT_CLEAN_VERSION);
   } catch { /* ignore */ }
 }
 

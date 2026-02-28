@@ -168,9 +168,12 @@ export default function AgriBuddy() {
     void histVer;
     const m = new Map<string, LocalRecord[]>();
     loadRecs().forEach(r => {
-      const arr = m.get(r.date) || [];
-      arr.push(r);
-      m.set(r.date, arr);
+      try {
+        if (!r.date) return;
+        const arr = m.get(r.date) || [];
+        arr.push(r);
+        m.set(r.date, arr);
+      } catch { /* skip bad record */ }
     });
     for (const arr of m.values()) arr.sort((a, b) => b.timestamp - a.timestamp);
     return m;
