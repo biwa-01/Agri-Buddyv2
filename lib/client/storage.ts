@@ -81,6 +81,8 @@ export function deepClean() {
   try {
     const CURRENT_CLEAN_VERSION = '2';
     if (localStorage.getItem(SK_DEEP_CLEANED) === CURRENT_CLEAN_VERSION) return;
+    const raw = localStorage.getItem(SK_RECORDS);
+    if (raw) localStorage.setItem('agri-buddy-records-backup', raw);
     const recs = loadRecs();
     let dirty = false;
     const cleaned = recs.map(r => {
@@ -101,7 +103,9 @@ export function deepClean() {
       const hasData = r.work_log || r.plant_status !== '良好' || r.fertilizer || r.pest_status ||
         r.harvest_amount || r.material_cost || r.work_duration || r.fuel_cost || r.house_data ||
         r.admin_log || r.raw_transcript;
-      const age = Date.now() - (r.timestamp || 0);
+      const ts = r.timestamp;
+      if (!ts) return true;  // timestampなし/0 = レガシーレコード → 削除しない
+      const age = Date.now() - ts;
       if (!hasData && age > 30 * 24 * 60 * 60 * 1000) { dirty = true; return false; }
       return true;
     });
