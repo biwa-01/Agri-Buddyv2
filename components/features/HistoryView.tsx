@@ -7,7 +7,7 @@ import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import type { LocalRecord, View } from '@/lib/types';
 import { GLASS, CARD_FLAT, DAY_NAMES, GENERIC_ADVICE_RE } from '@/lib/constants';
 import { fmtVal, extractNextActions, sanitizeLocation, extractCorrections, buildRecordChips, normalizeLocationName } from '@/lib/logic/extraction';
-import { generateOfficialReport } from '@/lib/logic/report';
+import { generateCultivationReport, generatePesticideReport } from '@/lib/logic/report';
 import { loadRecs } from '@/lib/client/storage';
 import { ChartTooltip } from '@/components/ui/ChartTooltip';
 import { Linkify } from '@/components/ui/Linkify';
@@ -408,14 +408,14 @@ export function HistoryView({
 
           <div className="mt-4 flex gap-2">
             <button onClick={() => {
-              const rpt = generateOfficialReport(loadRecs(), calMonth.getFullYear(), calMonth.getMonth(), 1);
+              const rpt = generateCultivationReport(loadRecs(), calMonth.getFullYear(), calMonth.getMonth(), 1);
               onShowReport(rpt, 'month');
             }} className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-stone-900/80 text-white text-base font-bold hover:bg-stone-900 btn-press">
               栽培管理記録
             </button>
             <button onClick={() => {
               const startMonth = calMonth.getMonth() < 6 ? 0 : 6;
-              const rpt = generateOfficialReport(loadRecs(), calMonth.getFullYear(), startMonth, 6);
+              const rpt = generatePesticideReport(loadRecs(), calMonth.getFullYear(), startMonth, 6);
               onShowReport(rpt, 'half');
             }} className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-base font-bold btn-press">
               防除実績一覧

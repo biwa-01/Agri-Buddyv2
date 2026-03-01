@@ -9,7 +9,7 @@ import {
 import type {
   ConvMessage, HouseData, ApiResponse,
   Phase, View, OutdoorWeather, LocalRecord, LastSession,
-  FollowUpStep, ConfirmItem, EmotionAnalysis,
+  FollowUpStep, ConfirmCard, EmotionAnalysis,
 } from '@/lib/types';
 import {
   APP_NAME, MAX_LISTEN_MS, BREATHING_MS,
@@ -87,7 +87,8 @@ export default function AgriBuddy() {
   const [followUpInfo, setFollowUpInfo] = useState<{ label: string; current: number; total: number } | null>(null);
 
   // Confirm screen state
-  const [confirmItems, setConfirmItems] = useState<ConfirmItem[]>([]);
+  const [confirmCards, setConfirmCards] = useState<ConfirmCard[]>([]);
+  const [recordDate, setRecordDate] = useState('');
 
   // Save-time Gemini wait
   const [saving, setSaving] = useState(false);
@@ -296,28 +297,36 @@ export default function AgriBuddy() {
 
   useEffect(() => () => { persistentRecogRef.current = false; try { recogRef.current?.stop(); } catch {} recogRef.current = null; invalidateRecogCache(); clr(); window.speechSynthesis?.cancel(); }, [clr]);
 
-  /* ── Build confirm items ── */
-  const buildConfirmItems = useCallback((): ConfirmItem[] => {
+  /* ── Build confirm cards ── */
+  const buildConfirmCards = useCallback((): ConfirmCard[] => {
     const d = pendingDataRef.current;
-    const items: ConfirmItem[] = [];
+    const sessionHouse = d.house_data;
 
-    // マルチ場所: per_locationが存在すれば場所ごとにadmin_logアイテムを生成
     if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
-      for (const pl of d.per_location) {
-        const loc = pl.location || '場所未定';
-        const adminText = pl.admin_log || '';
-        items.push({ key: `admin_log_${loc}`, label: loc, value: adminText });
-      }
-      return items;
+      return d.per_location.map((pl: Record<string, unknown>, i: number) => {
+        const plHouse = pl.house_data as HouseData | null | undefined;
+        return {
+          idx: i,
+          location: normalizeLocationName(String(pl.location || '')) || String(pl.location || '') || '場所未定',
+          max_temp: (pl.max_temp as number | null | undefined) ?? plHouse?.max_temp ?? sessionHouse?.max_temp ?? null,
+          min_temp: (pl.min_temp as number | null | undefined) ?? plHouse?.min_temp ?? sessionHouse?.min_temp ?? null,
+          humidity: plHouse?.humidity ?? sessionHouse?.humidity ?? null,
+          admin_log: String(pl.admin_log || ''),
+        };
+      });
     }
 
-    // シングル場所: 1つのadmin_logアイテム
     const loc = normalizeLocationName(locRef.current) || locRef.current;
     const slots = buildSlotsFromPending(d);
     const adminText = d.admin_log || generateAdminLog(slots, loc);
-    items.push({ key: 'admin_log', label: loc || '営農日誌', value: adminText });
-
-    return items;
+    return [{
+      idx: -1,
+      location: loc || '',
+      max_temp: sessionHouse?.max_temp ?? null,
+      min_temp: sessionHouse?.min_temp ?? null,
+      humidity: sessionHouse?.humidity ?? null,
+      admin_log: adminText,
+    }];
   }, []);
 
   /* ── Show Confirm Screen ── */
@@ -337,17 +346,19 @@ export default function AgriBuddy() {
         pendingDataRef.current.raw_transcript = rawTranscriptRef.current.join(' / ');
       }
 
-      const items = buildConfirmItems();
+      const d = pendingDataRef.current;
+      const cards = buildConfirmCards();
 
       // 空チェック: admin_logが空なら記録データなし
-      const hasRealData = items.some(it => it.value.trim());
-      if (items.length === 0 || !hasRealData) {
+      const hasRealData = cards.some(c => c.admin_log.trim() || c.max_temp != null || c.min_temp != null);
+      if (cards.length === 0 || !hasRealData) {
         setPhase('IDLE');
         speak('きろくするデータがありませんでした。もういちどはじめてください。');
         return;
       }
 
-      setConfirmItems(items);
+      setConfirmCards(cards);
+      setRecordDate(d.ocr_date || new Date().toISOString().split('T')[0]);
       setPhase('CONFIRM');
 
       const dur = pendingDataRef.current.work_duration;
@@ -362,7 +373,7 @@ export default function AgriBuddy() {
       setPhase('IDLE');
       speak('エラーが発生しました。もういちどはじめてください。');
     }
-  }, [buildConfirmItems]);
+  }, [buildConfirmCards]);
 
   /* ── OCR Handler ── */
   const handleOcr = useCallback(async (file: File) => {
@@ -436,24 +447,24 @@ export default function AgriBuddy() {
     window.speechSynthesis?.cancel();
     if (adminLogDebounceRef.current) { clearTimeout(adminLogDebounceRef.current); adminLogDebounceRef.current = null; }
     const d = pendingDataRef.current;
-    const dateStr = d.ocr_date || new Date().toISOString().split('T')[0];
+    const dateStr = recordDate || d.ocr_date || new Date().toISOString().split('T')[0];
 
-    // マルチ場所: per_locationの各要素+confirmItemsのtextarea値でLocalRecordを生成
+    // マルチ場所: per_locationの各要素+confirmCardsから読み取り
     if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
-      for (const pl of d.per_location) {
-        const loc = pl.location || '';
-        const confirmItem = confirmItems.find(it => it.key === `admin_log_${loc}`);
-        const adminText = confirmItem?.value || pl.admin_log || '';
+      for (const card of confirmCards) {
+        const pl = d.per_location[card.idx] || {};
+        const loc = card.location || '';
         const locMaster = findLocationByName(loc);
         const slots = buildSlotsFromPending(pl);
         const conf = calcConfidence(slots);
         const rec: LocalRecord = {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           date: dateStr, location: loc,
-          house_data: pl.house_data || null, work_log: pl.work_log || '',
+          house_data: { max_temp: card.max_temp, min_temp: card.min_temp, humidity: card.humidity },
+          work_log: pl.work_log || '',
           plant_status: pl.plant_status || '良好',
           advice: pl.advice || generateAdvice(slots, conf),
-          admin_log: adminText, fertilizer: pl.fertilizer || '',
+          admin_log: card.admin_log, fertilizer: pl.fertilizer || '',
           pest_status: pl.pest_status || '', harvest_amount: pl.harvest_amount || '',
           material_cost: pl.material_cost || '', work_duration: pl.work_duration || '',
           fuel_cost: pl.fuel_cost || '',
@@ -470,22 +481,23 @@ export default function AgriBuddy() {
           saveSession({ location: loc, work: pl.work_log || '', date: dateStr });
         }
       }
-      setPendSync(p => p + d.per_location.length);
+      setPendSync(p => p + confirmCards.length);
     } else {
       // シングル場所
-      const loc = locRef.current;
-      const confirmItem = confirmItems.find(it => it.key === 'admin_log');
+      const card = confirmCards[0];
+      const loc = card?.location || locRef.current;
       const slots = buildSlotsFromPending(d);
       const conf = calcConfidence(slots);
       const adviceText = d.advice || generateAdvice(slots, conf);
       const strategicText = d.strategic_advice || generateStrategicAdvice(slots);
-      const adminText = confirmItem?.value || d.admin_log || generateAdminLog(slots, loc);
+      const adminText = card?.admin_log || d.admin_log || generateAdminLog(slots, loc);
       const profit = calculateProfitPreview(d);
       const locMaster = findLocationByName(loc);
       const rec: LocalRecord = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         date: dateStr, location: loc,
-        house_data: d.house_data || null, work_log: d.work_log || '',
+        house_data: card ? { max_temp: card.max_temp, min_temp: card.min_temp, humidity: card.humidity } : (d.house_data || null),
+        work_log: d.work_log || '',
         plant_status: d.plant_status || '良好', advice: adviceText,
         admin_log: adminText, fertilizer: d.fertilizer || '',
         pest_status: d.pest_status || '', harvest_amount: d.harvest_amount || '',
@@ -505,7 +517,8 @@ export default function AgriBuddy() {
     setLocationOptions(getLocationNames());
     setHistVer(v => v + 1);
     setPhotoCount(0);
-    setConfirmItems([]);
+    setConfirmCards([]);
+    setRecordDate('');
     setIsNewLocation(false);
     mediaPreview.forEach(m => URL.revokeObjectURL(m.url));
     setMediaPreview([]);
@@ -584,11 +597,13 @@ export default function AgriBuddy() {
     }
     if (navigator.onLine) setTimeout(syncRecs, 500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [confirmItems, photoCount, syncRecs, pendingMediaId, clr]);
+  }, [confirmCards, recordDate, photoCount, syncRecs, pendingMediaId, clr]);
 
-  /* ── Update confirm item ── */
-  const updateConfirmItem = useCallback((key: string, val: string) => {
-    setConfirmItems(prev => prev.map(it => it.key === key ? { ...it, value: val } : it));
+  /* ── Update confirm card ── */
+  const updateConfirmCard = useCallback((idx: number, field: keyof ConfirmCard, value: string | number | null) => {
+    setConfirmCards(prev => prev.map(c =>
+      c.idx === idx ? { ...c, [field]: value } : c
+    ));
   }, []);
 
   /* ── Start Listening ── */
@@ -1083,7 +1098,7 @@ export default function AgriBuddy() {
     }
     setTranscript(''); setAiReply(''); setConv([]); setProfitPreview(null);
     setPhotoCount(0); setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
-    setBump(null); setConfidence(null); setConfirmItems([]); setFollowUpInfo(null);
+    setBump(null); setConfidence(null); setConfirmCards([]); setRecordDate(''); setFollowUpInfo(null);
     setMentorDraft(''); setMentorCopied(false); setMentorStep('comfort'); setConsultSheet('');
     mediaPreview.forEach(m => URL.revokeObjectURL(m.url));
     setMediaPreview([]);
@@ -1118,7 +1133,8 @@ export default function AgriBuddy() {
     setEmpathyCard(null);
     rawTranscriptRef.current = [];
     setFollowUpInfo(null);
-    setConfirmItems([]);
+    setConfirmCards([]);
+    setRecordDate('');
     setMentorDraft('');
     setMentorCopied(false);
     setMentorStep('comfort');
@@ -1231,16 +1247,20 @@ export default function AgriBuddy() {
           )}
 
           {/* ═══ CONFIRM SCREEN ═══ */}
-          {phase === 'CONFIRM' && confirmItems.length > 0 && (
+          {phase === 'CONFIRM' && confirmCards.length > 0 && (
             <ConfirmScreen
-              confirmItems={confirmItems} onUpdate={updateConfirmItem}
+              cards={confirmCards}
+              recordDate={recordDate}
+              locationOptions={locationOptions}
+              onUpdateCard={updateConfirmCard}
+              onDateChange={setRecordDate}
               onSave={saveFromConfirm} onReset={reset}
               saving={saving}
             />
           )}
 
           {/* ═══ CONFIRM FALLBACK (empty items safety net) ═══ */}
-          {phase === 'CONFIRM' && confirmItems.length === 0 && (
+          {phase === 'CONFIRM' && confirmCards.length === 0 && (
             <section className="mx-5 mb-4 fade-up">
               <div className={`p-5 rounded-2xl ${GLASS}`}>
                 <p className="text-xl font-bold text-stone-700 mb-4">記録するデータがありません</p>

@@ -25,6 +25,8 @@ export interface PerLocationRecord {
   work_log: string;
   admin_log: string;
   house_data?: HouseData | null;
+  max_temp?: number | null;
+  min_temp?: number | null;
   fertilizer?: string;
   pest_status?: string;
   pesticide_detail?: string;
@@ -35,6 +37,15 @@ export interface PerLocationRecord {
   plant_status?: string;
   advice?: string;
   strategic_advice?: string;
+}
+
+export interface ConfirmCard {
+  idx: number;
+  location: string;
+  max_temp: number | null;
+  min_temp: number | null;
+  humidity: number | null;
+  admin_log: string;
 }
 
 export interface ApiResponse {
