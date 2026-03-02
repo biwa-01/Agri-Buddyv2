@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Mic, Sprout, TrendingUp, Search, X, MapPin } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Mic, Sprout, TrendingUp, Search, X, MapPin, Pencil } from 'lucide-react';
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 import type { LocalRecord, View } from '@/lib/types';
@@ -71,13 +71,14 @@ interface HistoryViewProps {
   setView: (v: View) => void;
   onShowReport: (text: string, type: 'month' | 'half') => void;
   onResetData: () => void;
+  onEditRecord: (rec: LocalRecord) => void;
 }
 
 export function HistoryView({
   hasChartData, trendData,
   calMonth, setCalMonth, calDays, calDate, setCalDate, todayISO,
   recordMap, calSelected, selectedMedia, setFullscreenMedia,
-  setView, onShowReport, onResetData,
+  setView, onShowReport, onResetData, onEditRecord,
 }: HistoryViewProps) {
 
   /* ── Filter state ── */
@@ -239,7 +240,7 @@ export function HistoryView({
             <div className="flex items-center gap-3 mb-2">
               <p className="text-sm font-bold text-stone-600">直近14日の気温推移</p>
               <div className="flex items-center gap-3 ml-auto text-xs font-medium">
-                <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#FF8C00] rounded" />最高</span>
+                <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-[#C46A3C] rounded" />最高</span>
                 <span className="flex items-center gap-1"><span className="w-3 h-0.5 bg-sky-500 rounded" />最低</span>
               </div>
             </div>
@@ -247,7 +248,7 @@ export function HistoryView({
               <LineChart data={trendData}>
                 <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#78716c' }} tickLine={false} axisLine={false} />
                 <Tooltip content={<ChartTooltip />} />
-                <Line type="monotone" dataKey="max_temp" stroke="#FF8C00" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="max_temp" stroke="#C46A3C" strokeWidth={2} dot={false} connectNulls />
                 <Line type="monotone" dataKey="min_temp" stroke="#0ea5e9" strokeWidth={2} dot={false} connectNulls />
               </LineChart>
             </ResponsiveContainer>
@@ -378,7 +379,7 @@ export function HistoryView({
                   className={`
                     relative aspect-square flex flex-col items-center justify-center rounded-xl text-2xl font-bold transition-all btn-press
                     ${isToday
-                      ? 'bg-gradient-to-br from-[#FF8C00] to-[#FF6B00] text-white shadow-md'
+                      ? 'bg-gradient-to-br from-terra to-terra-dark text-white shadow-md'
                       : isSel
                         ? 'bg-orange-100 text-orange-800 ring-2 ring-orange-400'
                         : filterActive && isMatch
@@ -417,7 +418,7 @@ export function HistoryView({
               const startMonth = calMonth.getMonth() < 6 ? 0 : 6;
               const rpt = generatePesticideReport(loadRecs(), calMonth.getFullYear(), startMonth, 6);
               onShowReport(rpt, 'half');
-            }} className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-base font-bold btn-press">
+            }} className="flex-1 flex items-center justify-center gap-2 px-3 py-3 rounded-2xl bg-gradient-to-r from-terra to-terra-dark text-white text-base font-bold btn-press">
               防除実績一覧
             </button>
           </div>
@@ -490,11 +491,17 @@ export function HistoryView({
           )}
           {calSelected.map((rec, idx) => (
           <div key={rec.id} className={`p-5 rounded-2xl ${GLASS} ${idx > 0 ? 'mt-3' : ''}`}>
-            {calSelected.length > 1 && rec.location && (
-              <p className="text-base font-bold text-amber-600 mb-2 flex items-center gap-1">
-                <MapPin className="w-4 h-4" />{rec.location}
-              </p>
-            )}
+            <div className="flex items-center justify-between mb-2">
+              {rec.location ? (
+                <p className="text-base font-bold text-amber-600 flex items-center gap-1">
+                  <MapPin className="w-4 h-4" />{rec.location}
+                </p>
+              ) : <span />}
+              <button onClick={() => onEditRecord(rec)}
+                className="p-2 rounded-xl bg-stone-100 text-stone-500 hover:bg-amber-50 hover:text-amber-700 btn-press transition-colors">
+                <Pencil className="w-4 h-4" />
+              </button>
+            </div>
             {/* ── チップ帯 ── */}
             {(() => {
               const chips = buildRecordChips(rec);

@@ -46,7 +46,7 @@ export function MentorMode({
               </p>
               <div className="flex gap-3 w-full">
                 <button onClick={() => setMentorStep('sheet')}
-                  className="flex-1 py-5 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-xl font-bold shadow-lg btn-press flex items-center justify-center gap-2">
+                  className="flex-1 py-5 rounded-2xl bg-gradient-to-r from-terra to-terra-dark text-white text-xl font-bold shadow-lg btn-press flex items-center justify-center gap-2">
                   <PhoneCall className="w-6 h-6" /> はい
                 </button>
                 <button onClick={onReset}
@@ -67,7 +67,7 @@ export function MentorMode({
                 setMentorCopied(true);
                 setTimeout(() => setMentorCopied(false), 2000);
               }}
-                className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-xl font-bold shadow-lg btn-press flex items-center justify-center gap-2">
+                className="flex-1 py-4 rounded-2xl bg-gradient-to-r from-terra to-terra-dark text-white text-xl font-bold shadow-lg btn-press flex items-center justify-center gap-2">
                 {mentorCopied ? <><Check className="w-6 h-6" /> コピー済</> : <><PhoneCall className="w-5 h-5" /> コピーして相談</>}
               </button>
               <button onClick={onReset}

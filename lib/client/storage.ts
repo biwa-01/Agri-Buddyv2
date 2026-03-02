@@ -51,7 +51,10 @@ export function loadRecs(): LocalRecord[] {
   } catch { return []; }
 }
 export function saveRecLS(r: LocalRecord) { const rs = loadRecs(); rs.push(r); localStorage.setItem(SK_RECORDS, JSON.stringify(rs)); }
+export function deleteRecLS(id: string) { const rs = loadRecs().filter(r => r.id !== id); localStorage.setItem(SK_RECORDS, JSON.stringify(rs)); }
+export function backupRecords() { const raw = localStorage.getItem(SK_RECORDS); if (raw) localStorage.setItem('agri-buddy-records-backup', raw); }
 export function markSync(id: string) { const rs = loadRecs(); localStorage.setItem(SK_RECORDS, JSON.stringify(rs.map(r => r.id === id ? { ...r, synced: true } : r))); }
+export function saveAllRecs(recs: LocalRecord[]) { localStorage.setItem(SK_RECORDS, JSON.stringify(recs)); }
 export function getUnsynced() { return loadRecs().filter(r => !r.synced); }
 export function loadSession(): LastSession | null { try { return JSON.parse(localStorage.getItem(SK_SESSION) || 'null'); } catch { return null; } }
 export function saveSession(s: LastSession) { localStorage.setItem(SK_SESSION, JSON.stringify(s)); }

@@ -26,7 +26,7 @@ import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
 import { speak, createRecog, invalidateRecogCache, isIOS } from '@/lib/client/speech';
 import {
-  loadRecs, saveRecLS, markSync, getUnsynced,
+  loadRecs, saveRecLS, deleteRecLS, backupRecords, markSync, getUnsynced, saveAllRecs,
   loadSession, saveSession, sanitizeRecords, deepClean,
   saveMediaBlob, loadMediaForRecord, updateMediaRecordId,
   getCalDays, saveMoodEntry,
@@ -41,11 +41,17 @@ import { CelebrationOverlay } from '@/components/features/CelebrationOverlay';
 import { FollowUpBar } from '@/components/features/FollowUpBar';
 import { TabBar } from '@/components/features/TabBar';
 import { EmpathyCard } from '@/components/features/EmpathyCard';
+import { useAuth } from '@/lib/client/auth';
+import { fullSync, pushRecord } from '@/lib/client/sync';
+import { LoginButton } from '@/components/features/LoginButton';
+import { SyncBanner } from '@/components/features/SyncBanner';
 
 /* ═══════════════════════════════════════════
    Main Component
    ═══════════════════════════════════════════ */
 export default function AgriBuddy() {
+  const { user } = useAuth();
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<Phase>('IDLE');
   const [view, setView] = useState<View>('record');
@@ -89,6 +95,9 @@ export default function AgriBuddy() {
   // Confirm screen state
   const [confirmCards, setConfirmCards] = useState<ConfirmCard[]>([]);
   const [recordDate, setRecordDate] = useState('');
+
+  // Edit mode
+  const [editingRecordIds, setEditingRecordIds] = useState<string[]>([]);
 
   // Save-time Gemini wait
   const [saving, setSaving] = useState(false);
@@ -283,12 +292,30 @@ export default function AgriBuddy() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const syncRecs = useCallback(() => {
-    const u = getUnsynced(); if (u.length === 0) return;
-    u.forEach(r => markSync(r.id)); setPendSync(0);
-  }, []);
+  const syncRecs = useCallback(async () => {
+    if (!user) {
+      // 未ログイン: 旧挙動（ローカルmarkSync）
+      const u = getUnsynced(); if (u.length === 0) return;
+      u.forEach(r => markSync(r.id)); setPendSync(0);
+      return;
+    }
+    setSyncStatus('syncing');
+    try {
+      const merged = await fullSync(user.uid);
+      saveAllRecs(merged);
+      setPendSync(0);
+      setHistVer(v => v + 1);
+      setSyncStatus('done');
+    } catch (err) {
+      console.error('[sync]', err);
+      setSyncStatus('error');
+      const u = getUnsynced(); u.forEach(r => markSync(r.id)); setPendSync(0);
+    }
+  }, [user]);
 
   useEffect(() => { if (isOnline && mounted) syncRecs(); }, [isOnline, mounted, syncRecs]);
+  // ログイン完了時の自動同期
+  useEffect(() => { if (user && mounted) syncRecs(); }, [user, mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clr = useCallback(() => {
     if (silRef.current) { clearTimeout(silRef.current); silRef.current = null; }
@@ -302,6 +329,8 @@ export default function AgriBuddy() {
     const d = pendingDataRef.current;
     const sessionHouse = d.house_data;
 
+    const defaultDate = d.ocr_date || new Date().toISOString().split('T')[0];
+
     if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
       return d.per_location.map((pl: Record<string, unknown>, i: number) => {
         const plHouse = pl.house_data as HouseData | null | undefined;
@@ -312,6 +341,7 @@ export default function AgriBuddy() {
           min_temp: (pl.min_temp as number | null | undefined) ?? plHouse?.min_temp ?? sessionHouse?.min_temp ?? null,
           humidity: plHouse?.humidity ?? sessionHouse?.humidity ?? null,
           admin_log: String(pl.admin_log || ''),
+          date: defaultDate,
         };
       });
     }
@@ -326,8 +356,50 @@ export default function AgriBuddy() {
       min_temp: sessionHouse?.min_temp ?? null,
       humidity: sessionHouse?.humidity ?? null,
       admin_log: adminText,
+      date: defaultDate,
     }];
   }, []);
+
+  /* ── Start Edit Record (HistoryView → CONFIRM) ── */
+  const startEditRecord = useCallback((rec: LocalRecord) => {
+    persistentRecogRef.current = false; mutedRef.current = false;
+    const _r = recogRef.current; recogRef.current = null;
+    if (_r) try { _r.stop(); } catch {}
+    clr(); window.speechSynthesis?.cancel();
+
+    pendingDataRef.current = {
+      work_log: rec.work_log,
+      plant_status: rec.plant_status,
+      advice: rec.advice,
+      fertilizer: rec.fertilizer,
+      pest_status: rec.pest_status,
+      harvest_amount: rec.harvest_amount,
+      material_cost: rec.material_cost,
+      work_duration: rec.work_duration,
+      fuel_cost: rec.fuel_cost,
+      strategic_advice: rec.strategic_advice,
+      pesticide_detail: rec.pesticide_detail,
+      raw_transcript: rec.raw_transcript,
+      estimated_profit: rec.estimated_profit,
+      house_data: rec.house_data,
+      photo_count: rec.photo_count,
+    };
+
+    const card: ConfirmCard = {
+      idx: 0,
+      location: rec.location || '',
+      max_temp: rec.house_data?.max_temp ?? null,
+      min_temp: rec.house_data?.min_temp ?? null,
+      humidity: rec.house_data?.humidity ?? null,
+      admin_log: rec.admin_log || '',
+      date: rec.date,
+    };
+    setConfirmCards([card]);
+    setRecordDate(rec.date);
+    setEditingRecordIds([rec.id]);
+    setPhase('CONFIRM');
+    setView('record');
+  }, [clr]);
 
   /* ── Show Confirm Screen ── */
   const showConfirmScreen = useCallback(() => {
@@ -447,71 +519,110 @@ export default function AgriBuddy() {
     window.speechSynthesis?.cancel();
     if (adminLogDebounceRef.current) { clearTimeout(adminLogDebounceRef.current); adminLogDebounceRef.current = null; }
     const d = pendingDataRef.current;
-    const dateStr = recordDate || d.ocr_date || new Date().toISOString().split('T')[0];
+    const isEdit = editingRecordIds.length > 0;
+    if (isEdit) backupRecords();
 
-    // マルチ場所: per_locationの各要素+confirmCardsから読み取り
-    if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
+    if (isEdit) {
+      // ── 編集モード: 旧レコード削除 → 新レコード保存 ──
+      for (const oldId of editingRecordIds) {
+        deleteRecLS(oldId);
+      }
       for (const card of confirmCards) {
-        const pl = d.per_location[card.idx] || {};
+        const dateStr = card.date || recordDate || new Date().toISOString().split('T')[0];
         const loc = card.location || '';
         const locMaster = findLocationByName(loc);
-        const slots = buildSlotsFromPending(pl);
-        const conf = calcConfidence(slots);
         const rec: LocalRecord = {
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           date: dateStr, location: loc,
           house_data: { max_temp: card.max_temp, min_temp: card.min_temp, humidity: card.humidity },
-          work_log: pl.work_log || '',
-          plant_status: pl.plant_status || '良好',
-          advice: pl.advice || generateAdvice(slots, conf),
-          admin_log: card.admin_log, fertilizer: pl.fertilizer || '',
-          pest_status: pl.pest_status || '', harvest_amount: pl.harvest_amount || '',
-          material_cost: pl.material_cost || '', work_duration: pl.work_duration || '',
-          fuel_cost: pl.fuel_cost || '',
-          strategic_advice: pl.strategic_advice || generateStrategicAdvice(slots),
-          pesticide_detail: pl.pesticide_detail || '',
-          photo_count: 0,
+          work_log: d.work_log || '', plant_status: d.plant_status || '良好',
+          advice: d.advice || '', admin_log: card.admin_log,
+          fertilizer: d.fertilizer || '', pest_status: d.pest_status || '',
+          harvest_amount: d.harvest_amount || '', material_cost: d.material_cost || '',
+          work_duration: d.work_duration || '', fuel_cost: d.fuel_cost || '',
+          strategic_advice: d.strategic_advice || '', pesticide_detail: d.pesticide_detail || '',
+          photo_count: d.photo_count ?? 0, estimated_profit: d.estimated_profit ?? undefined,
+          raw_transcript: d.raw_transcript || undefined, location_id: locMaster?.id,
+          synced: false, timestamp: Date.now(),
+        };
+        saveRecLS(rec);
+        if (user) pushRecord(user.uid, rec).catch(e => console.error('[sync] push:', e));
+        if (loc) addLocation(loc);
+      }
+      setEditingRecordIds([]);
+      setPendSync(p => p + confirmCards.length);
+    } else {
+      // ── 新規モード ──
+      const fallbackDate = recordDate || d.ocr_date || new Date().toISOString().split('T')[0];
+
+      // マルチ場所: per_locationの各要素+confirmCardsから読み取り
+      if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
+        for (const card of confirmCards) {
+          const pl = d.per_location[card.idx] || {};
+          const loc = card.location || '';
+          const dateStr = card.date || fallbackDate;
+          const locMaster = findLocationByName(loc);
+          const slots = buildSlotsFromPending(pl);
+          const conf = calcConfidence(slots);
+          const rec: LocalRecord = {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            date: dateStr, location: loc,
+            house_data: { max_temp: card.max_temp, min_temp: card.min_temp, humidity: card.humidity },
+            work_log: pl.work_log || '',
+            plant_status: pl.plant_status || '良好',
+            advice: pl.advice || generateAdvice(slots, conf),
+            admin_log: card.admin_log, fertilizer: pl.fertilizer || '',
+            pest_status: pl.pest_status || '', harvest_amount: pl.harvest_amount || '',
+            material_cost: pl.material_cost || '', work_duration: pl.work_duration || '',
+            fuel_cost: pl.fuel_cost || '',
+            strategic_advice: pl.strategic_advice || generateStrategicAdvice(slots),
+            pesticide_detail: pl.pesticide_detail || '',
+            photo_count: 0,
+            raw_transcript: d.raw_transcript || undefined,
+            location_id: locMaster?.id,
+            synced: false, timestamp: Date.now(),
+          };
+          saveRecLS(rec);
+          if (user) pushRecord(user.uid, rec).catch(e => console.error('[sync] push:', e));
+          if (loc) {
+            addLocation(loc);
+            saveSession({ location: loc, work: pl.work_log || '', date: dateStr });
+          }
+        }
+        setPendSync(p => p + confirmCards.length);
+      } else {
+        // シングル場所
+        const card = confirmCards[0];
+        const dateStr = card?.date || fallbackDate;
+        const loc = card?.location || locRef.current;
+        const slots = buildSlotsFromPending(d);
+        const conf = calcConfidence(slots);
+        const adviceText = d.advice || generateAdvice(slots, conf);
+        const strategicText = d.strategic_advice || generateStrategicAdvice(slots);
+        const adminText = card?.admin_log || d.admin_log || generateAdminLog(slots, loc);
+        const profit = calculateProfitPreview(d);
+        const locMaster = findLocationByName(loc);
+        const rec: LocalRecord = {
+          id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          date: dateStr, location: loc,
+          house_data: card ? { max_temp: card.max_temp, min_temp: card.min_temp, humidity: card.humidity } : (d.house_data || null),
+          work_log: d.work_log || '',
+          plant_status: d.plant_status || '良好', advice: adviceText,
+          admin_log: adminText, fertilizer: d.fertilizer || '',
+          pest_status: d.pest_status || '', harvest_amount: d.harvest_amount || '',
+          material_cost: d.material_cost || '', work_duration: d.work_duration || '',
+          fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
+          pesticide_detail: d.pesticide_detail || '',
+          photo_count: photoCount, estimated_profit: profit.total,
           raw_transcript: d.raw_transcript || undefined,
           location_id: locMaster?.id,
           synced: false, timestamp: Date.now(),
         };
-        saveRecLS(rec);
-        if (loc) {
-          addLocation(loc);
-          saveSession({ location: loc, work: pl.work_log || '', date: dateStr });
-        }
+        saveRecLS(rec); setPendSync(p => p + 1);
+        if (user) pushRecord(user.uid, rec).catch(e => console.error('[sync] push:', e));
+        saveSession({ location: loc, work: d.work_log || '', date: dateStr });
+        updateMediaRecordId(pendingMediaId, rec.id).catch(() => {});
       }
-      setPendSync(p => p + confirmCards.length);
-    } else {
-      // シングル場所
-      const card = confirmCards[0];
-      const loc = card?.location || locRef.current;
-      const slots = buildSlotsFromPending(d);
-      const conf = calcConfidence(slots);
-      const adviceText = d.advice || generateAdvice(slots, conf);
-      const strategicText = d.strategic_advice || generateStrategicAdvice(slots);
-      const adminText = card?.admin_log || d.admin_log || generateAdminLog(slots, loc);
-      const profit = calculateProfitPreview(d);
-      const locMaster = findLocationByName(loc);
-      const rec: LocalRecord = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        date: dateStr, location: loc,
-        house_data: card ? { max_temp: card.max_temp, min_temp: card.min_temp, humidity: card.humidity } : (d.house_data || null),
-        work_log: d.work_log || '',
-        plant_status: d.plant_status || '良好', advice: adviceText,
-        admin_log: adminText, fertilizer: d.fertilizer || '',
-        pest_status: d.pest_status || '', harvest_amount: d.harvest_amount || '',
-        material_cost: d.material_cost || '', work_duration: d.work_duration || '',
-        fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
-        pesticide_detail: d.pesticide_detail || '',
-        photo_count: photoCount, estimated_profit: profit.total,
-        raw_transcript: d.raw_transcript || undefined,
-        location_id: locMaster?.id,
-        synced: false, timestamp: Date.now(),
-      };
-      saveRecLS(rec); setPendSync(p => p + 1);
-      saveSession({ location: loc, work: d.work_log || '', date: dateStr });
-      updateMediaRecordId(pendingMediaId, rec.id).catch(() => {});
     }
 
     setLocationOptions(getLocationNames());
@@ -533,6 +644,15 @@ export default function AgriBuddy() {
     setFollowUpInfo(null);
     setBump(null);
     setConfidence(null);
+
+    // 編集モード: celebration/SOS処理スキップ、シンプルにIDLE遷移
+    if (isEdit) {
+      const msg = '記録を更新しました。';
+      setAiReply(msg); setPhase('IDLE'); setView('history');
+      speak(msg);
+      if (navigator.onLine) setTimeout(syncRecs, 500);
+      return;
+    }
 
     if (sosDetectedRef.current) {
       sosDetectedRef.current = false;
@@ -597,7 +717,7 @@ export default function AgriBuddy() {
     }
     if (navigator.onLine) setTimeout(syncRecs, 500);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [confirmCards, recordDate, photoCount, syncRecs, pendingMediaId, clr]);
+  }, [confirmCards, recordDate, photoCount, syncRecs, pendingMediaId, clr, editingRecordIds, user]);
 
   /* ── Update confirm card ── */
   const updateConfirmCard = useCallback((idx: number, field: keyof ConfirmCard, value: string | number | null) => {
@@ -1135,6 +1255,7 @@ export default function AgriBuddy() {
     setFollowUpInfo(null);
     setConfirmCards([]);
     setRecordDate('');
+    setEditingRecordIds([]);
     setMentorDraft('');
     setMentorCopied(false);
     setMentorStep('comfort');
@@ -1209,6 +1330,7 @@ export default function AgriBuddy() {
         <div className="flex items-center justify-between">
           <h1 className="font-display text-3xl font-black text-white tracking-wider">{APP_NAME}</h1>
           <div className="flex items-center gap-2">
+            {mounted && <LoginButton />}
             {outdoor && outdoor.code >= 0 && (
               <div className={`px-2.5 py-1 rounded-full text-sm font-bold ${CARD_FLAT}`}>
                 <span className="text-stone-700">{outdoor.description} {outdoor.temperature}℃</span>
@@ -1216,9 +1338,21 @@ export default function AgriBuddy() {
             )}
             {mounted && (
               <div className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                isOnline ? 'bg-green-500/20 text-green-200 border border-green-400/30' : 'bg-red-500/20 text-red-200 border border-red-400/30 offline-pulse'
+                !user
+                  ? 'bg-stone-500/20 text-stone-300 border border-stone-400/30'
+                  : syncStatus === 'syncing'
+                    ? 'bg-blue-500/20 text-blue-200 border border-blue-400/30 animate-pulse'
+                    : pendSync > 0
+                      ? 'bg-red-500/20 text-red-200 border border-red-400/30 offline-pulse'
+                      : isOnline
+                        ? 'bg-green-500/20 text-green-200 border border-green-400/30'
+                        : 'bg-red-500/20 text-red-200 border border-red-400/30 offline-pulse'
               }`}>
-                {isOnline ? '同期済' : `未同期${pendSync > 0 ? `(${pendSync})` : ''}`}
+                {!user ? '未接続'
+                  : syncStatus === 'syncing' ? '同期中...'
+                  : pendSync > 0 ? `未同期(${pendSync})`
+                  : isOnline ? '同期済'
+                  : '未同期'}
               </div>
             )}
           </div>
@@ -1256,6 +1390,7 @@ export default function AgriBuddy() {
               onDateChange={setRecordDate}
               onSave={saveFromConfirm} onReset={reset}
               saving={saving}
+              isEditMode={editingRecordIds.length > 0}
             />
           )}
 
@@ -1265,7 +1400,7 @@ export default function AgriBuddy() {
               <div className={`p-5 rounded-2xl ${GLASS}`}>
                 <p className="text-xl font-bold text-stone-700 mb-4">記録するデータがありません</p>
                 <button onClick={reset}
-                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-xl font-bold shadow-lg btn-press">
+                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-terra to-terra-dark text-white text-xl font-bold shadow-lg btn-press">
                   もどる
                 </button>
               </div>
@@ -1275,6 +1410,7 @@ export default function AgriBuddy() {
           {/* ═══ IDLE CONTENT ═══ */}
           {phase === 'IDLE' && (
             <>
+              <SyncBanner onSync={syncRecs} />
               {httpsRedirectUrl && (
                 <section className="mx-5 mb-4 fade-up">
                   <a href={httpsRedirectUrl}
@@ -1479,8 +1615,8 @@ export default function AgriBuddy() {
                               : phase === 'BREATHING'
                                 ? 'bg-gradient-to-br from-amber-300 to-orange-400 opacity-60 cursor-wait'
                                 : phase === 'FOLLOW_UP'
-                                  ? 'bg-gradient-to-br from-[#FF8C00] to-[#FF6B00] biwa-pulse shadow-[0_8px_50px_rgba(255,140,0,0.5)]'
-                                  : 'bg-gradient-to-br from-[#FF8C00] to-[#FF6B00] shadow-[0_8px_50px_rgba(255,140,0,0.5)]'
+                                  ? 'bg-gradient-to-br from-terra to-terra-dark biwa-pulse shadow-[0_8px_50px_rgba(196,106,60,0.45)]'
+                                  : 'bg-gradient-to-br from-terra to-terra-dark shadow-[0_8px_50px_rgba(196,106,60,0.45)]'
                           }
                         `}
                         aria-label="タップして話す"
@@ -1554,6 +1690,7 @@ export default function AgriBuddy() {
           todayISO={todayISO} recordMap={recordMap} calSelected={calSelected}
           selectedMedia={selectedMedia} setFullscreenMedia={setFullscreenMedia}
           setView={setView} onShowReport={handleShowReport} onResetData={handleResetData}
+          onEditRecord={startEditRecord}
         />
       )}
 
@@ -1591,7 +1728,7 @@ export default function AgriBuddy() {
         <div className="fixed inset-0 z-50 bg-stone-900/95 flex flex-col">
           <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
             <h2 className="text-lg font-bold text-white">
-              {reportType === 'half' ? '就農状況報告書' : '月次レポート'}
+              {reportType === 'half' ? '防除実績一覧' : '栽培管理記録'}
             </h2>
             <div className="flex items-center gap-2">
               <button onClick={() => {
@@ -1600,7 +1737,7 @@ export default function AgriBuddy() {
                 const a = document.createElement('a'); a.href = url;
                 a.download = `agri-buddy-report-${calMonth.getFullYear()}-${calMonth.getMonth() + 1}.txt`;
                 a.click(); URL.revokeObjectURL(url);
-              }} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-sm font-bold btn-press">
+              }} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-terra to-terra-dark text-white text-sm font-bold btn-press">
                 <Download className="w-4 h-4" /> 保存
               </button>
               <button onClick={() => { setReportFullscreen(false); setShowReport(false); }}

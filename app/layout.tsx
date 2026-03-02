@@ -1,17 +1,18 @@
 import type { Metadata } from "next";
-import { Noto_Sans_JP, Noto_Serif_JP } from "next/font/google";
+import { Zen_Maru_Gothic, Shippori_Mincho_B1 } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/lib/client/auth";
 
-const notoSansJP = Noto_Sans_JP({
+const zenMaru = Zen_Maru_Gothic({
   subsets: ["latin"],
   weight: ["500", "700", "900"],
-  variable: "--font-noto",
+  variable: "--font-body",
 });
 
-const notoSerifJP = Noto_Serif_JP({
+const shippori = Shippori_Mincho_B1({
   subsets: ["latin"],
-  weight: ["700", "900"],
-  variable: "--font-noto-serif",
+  weight: ["700", "800"],
+  variable: "--font-heading",
 });
 
 const appName = process.env.NEXT_PUBLIC_APP_NAME || "Agri-Buddy";
@@ -24,16 +25,18 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ja" style={{ colorScheme: 'light' }}>
-      <body className={`${notoSansJP.variable} ${notoSerifJP.variable} font-sans antialiased min-h-screen bg-stone-100`}>
+      <body className={`${zenMaru.variable} ${shippori.variable} font-sans antialiased min-h-screen bg-stone-100`}>
         <div className="fixed inset-0 z-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/bg-farm.jpg"
             alt="" className="absolute inset-0 w-full h-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-stone-900/50 via-stone-800/40 to-stone-900/70" />
+          <div className="absolute inset-0 bg-gradient-to-b from-stone-900/60 via-stone-800/35 to-stone-900/75" />
         </div>
-        <div className="relative z-10">{children}</div>
+        <AuthProvider>
+          <div className="relative z-10">{children}</div>
+        </AuthProvider>
       </body>
     </html>
   );

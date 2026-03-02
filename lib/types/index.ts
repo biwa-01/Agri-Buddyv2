@@ -46,6 +46,7 @@ export interface ConfirmCard {
   min_temp: number | null;
   humidity: number | null;
   admin_log: string;
+  date: string;
 }
 
 export interface ApiResponse {

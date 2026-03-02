@@ -19,7 +19,7 @@ export function FollowUpBar({ onConfirm, onSkipAll }: FollowUpBarProps) {
           <SkipForward className="w-6 h-6" /> スキップ
         </button>
         <button onClick={onSkipAll}
-          className="flex-1 rounded-2xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] flex items-center justify-center px-4 text-xl font-bold text-white shadow-lg btn-press min-h-[72px]">
+          className="flex-1 rounded-2xl bg-gradient-to-r from-terra to-terra-dark flex items-center justify-center px-4 text-xl font-bold text-white shadow-lg btn-press min-h-[72px]">
           記録終了
         </button>
       </div>

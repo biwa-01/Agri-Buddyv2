@@ -14,27 +14,19 @@ interface ConfirmScreenProps {
   onSave: () => void;
   onReset: () => void;
   saving?: boolean;
+  isEditMode?: boolean;
 }
 
-export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard, onDateChange, onSave, onReset, saving }: ConfirmScreenProps) {
+export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard, onDateChange, onSave, onReset, saving, isEditMode }: ConfirmScreenProps) {
   return (
     <section className="mx-5 mb-4 fade-up">
       <div className={`p-5 rounded-2xl ${GLASS}`}>
-        <h2 className="font-display text-2xl tracking-[0.3em] text-stone-900 font-bold mb-2">営 農 日 誌</h2>
-        <p className="text-base font-medium text-stone-500 mb-4">内容を確認・修正して「保存」を押してください。</p>
-
-        {/* 日付セレクター */}
-        <div className="mb-4 p-4 rounded-xl bg-amber-50/80 border border-amber-200/50">
-          <label className="flex items-center gap-2 text-base font-bold text-amber-800 mb-2">
-            <Calendar className="w-5 h-5" />実施日
-          </label>
-          <input
-            type="date"
-            value={recordDate}
-            onChange={e => onDateChange(e.target.value)}
-            className="w-full py-3 px-4 text-lg font-bold text-stone-900 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
-          />
-        </div>
+        <h2 className="font-display text-2xl tracking-[0.3em] text-stone-900 font-bold mb-2">
+          {isEditMode ? '記録の編集' : '営 農 日 誌'}
+        </h2>
+        <p className="text-base font-medium text-stone-500 mb-4">
+          {isEditMode ? '内容を修正して「更新する」を押してください。' : '内容を確認・修正して「保存」を押してください。'}
+        </p>
 
         {/* 場所カード */}
         <div className="space-y-4">
@@ -44,22 +36,24 @@ export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard
               card={card}
               locationOptions={locationOptions}
               onUpdate={onUpdateCard}
+              onDateChange={onDateChange}
+              isEditMode={isEditMode}
             />
           ))}
         </div>
 
         <div className="mt-5 flex gap-3">
           <button onClick={onSave} disabled={saving}
-            className={`flex-1 py-5 rounded-3xl bg-gradient-to-r from-[#FF8C00] to-[#FF6B00] text-white text-2xl font-black shadow-lg btn-press flex items-center justify-center gap-2 ${saving ? 'opacity-70' : ''}`}>
+            className={`flex-1 py-5 rounded-3xl bg-gradient-to-r from-terra to-terra-dark text-white text-2xl font-black shadow-lg btn-press flex items-center justify-center gap-2 ${saving ? 'opacity-70' : ''}`}>
             {saving ? (
               <><span className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin inline-block" /> 日誌生成中...</>
             ) : (
-              <><Check className="w-7 h-7" /> 保存する</>
+              <><Check className="w-7 h-7" /> {isEditMode ? '更新する' : '保存する'}</>
             )}
           </button>
           <button onClick={onReset}
             className="py-5 px-6 rounded-2xl bg-stone-200/80 text-stone-600 text-xl font-bold btn-press flex items-center justify-center gap-2">
-            <X className="w-6 h-6" /> 破棄
+            <X className="w-6 h-6" /> {isEditMode ? 'キャンセル' : '破棄'}
           </button>
         </div>
       </div>
@@ -68,10 +62,12 @@ export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard
 }
 
 /* ── 場所別カード ── */
-function LocationCard({ card, locationOptions, onUpdate }: {
+function LocationCard({ card, locationOptions, onUpdate, onDateChange, isEditMode }: {
   card: ConfirmCard;
   locationOptions: string[];
   onUpdate: (idx: number, field: keyof ConfirmCard, value: string | number | null) => void;
+  onDateChange: (date: string) => void;
+  isEditMode?: boolean;
 }) {
   const [showChips, setShowChips] = useState(false);
 
@@ -89,6 +85,21 @@ function LocationCard({ card, locationOptions, onUpdate }: {
 
   return (
     <div className="p-4 rounded-xl bg-blue-50 border-2 border-blue-300">
+      {/* 実施日 */}
+      <div className="mb-3 p-3 rounded-xl bg-amber-50/80 border border-amber-200/50">
+        <label className="flex items-center gap-1.5 text-xs font-bold text-amber-700 mb-1">
+          <Calendar className="w-3.5 h-3.5" />実施日
+        </label>
+        <input type="date"
+          value={card.date}
+          onChange={e => {
+            onUpdate(card.idx, 'date', e.target.value);
+            if (!isEditMode) onDateChange(e.target.value);
+          }}
+          className="w-full py-2 px-3 text-lg font-bold text-stone-900 bg-white border border-stone-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400"
+        />
+      </div>
+
       {/* 場所名ヘッダー */}
       <div className="flex items-center gap-2 mb-3">
         <MapPin className="w-5 h-5 text-blue-700 shrink-0" />

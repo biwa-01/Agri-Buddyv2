@@ -1,8 +1,38 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: var(--font-noto), ui-sans-serif, system-ui, sans-serif;
-  --font-display: var(--font-noto-serif), ui-serif, Georgia, serif;
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-heading), ui-serif, Georgia, serif;
+  --font-serif: var(--font-heading), ui-serif, Georgia, serif;
+
+  /* ── Earth palette: warm-shifted stone ── */
+  --color-stone-50: #FEFBF6;
+  --color-stone-100: #FBF3E8;
+  --color-stone-200: #F0E2CE;
+  --color-stone-300: #DDCCB0;
+  --color-stone-400: #B89E80;
+  --color-stone-500: #907862;
+  --color-stone-600: #6B5744;
+  --color-stone-700: #524030;
+  --color-stone-800: #3A2C1E;
+  --color-stone-900: #2C1C10;
+
+  /* ── Harvest gold: warm-shifted amber ── */
+  --color-amber-50: #FFF8EB;
+  --color-amber-100: #FFEDC8;
+  --color-amber-200: #FFDB8F;
+  --color-amber-300: #FFC85C;
+  --color-amber-400: #DAA440;
+  --color-amber-500: #BC8A30;
+  --color-amber-600: #926B22;
+  --color-amber-700: #6D501A;
+  --color-amber-800: #4D3812;
+  --color-amber-900: #362B0D;
+
+  /* ── Terra: primary action (cinnamon / burnt sienna) ── */
+  --color-terra: #C46A3C;
+  --color-terra-dark: #A85230;
+  --color-terra-light: #D4785A;
 }
 
 /* ── Force light mode: no auto-detection ── */
@@ -115,7 +145,7 @@ html {
 }
 .celebration-pop { animation: celebration-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
 
-/* ── Confetti fall ── */
+/* ── Confetti fall (warm earth palette) ── */
 @keyframes confetti-fall {
   0% { transform: translateY(-100vh) rotate(0deg); opacity: 1; }
   100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
@@ -129,21 +159,21 @@ html {
   border-radius: 2px;
   animation: confetti-fall 2.2s ease-in forwards;
 }
-.confetti-piece:nth-child(1) { left: 10%; background: #FF8C00; animation-delay: 0s; }
-.confetti-piece:nth-child(2) { left: 25%; background: #22C55E; animation-delay: 0.2s; width: 8px; height: 12px; }
-.confetti-piece:nth-child(3) { left: 40%; background: #F59E0B; animation-delay: 0.4s; }
-.confetti-piece:nth-child(4) { left: 55%; background: #EF4444; animation-delay: 0.1s; width: 12px; height: 8px; }
-.confetti-piece:nth-child(5) { left: 70%; background: #3B82F6; animation-delay: 0.3s; }
-.confetti-piece:nth-child(6) { left: 85%; background: #A855F7; animation-delay: 0.5s; width: 8px; height: 12px; }
-.confetti-piece:nth-child(7) { left: 15%; background: #EC4899; animation-delay: 0.6s; }
-.confetti-piece:nth-child(8) { left: 60%; background: #14B8A6; animation-delay: 0.35s; width: 12px; height: 8px; }
-.confetti-piece:nth-child(9) { left: 5%; background: #F97316; animation-delay: 0.15s; width: 7px; height: 11px; }
-.confetti-piece:nth-child(10) { left: 20%; background: #10B981; animation-delay: 0.45s; }
-.confetti-piece:nth-child(11) { left: 33%; background: #8B5CF6; animation-delay: 0.25s; width: 12px; height: 8px; }
-.confetti-piece:nth-child(12) { left: 48%; background: #F43F5E; animation-delay: 0.55s; width: 8px; height: 12px; }
-.confetti-piece:nth-child(13) { left: 63%; background: #06B6D4; animation-delay: 0.1s; }
-.confetti-piece:nth-child(14) { left: 78%; background: #FBBF24; animation-delay: 0.4s; width: 11px; height: 7px; }
-.confetti-piece:nth-child(15) { left: 92%; background: #34D399; animation-delay: 0.65s; width: 8px; height: 12px; }
+.confetti-piece:nth-child(1)  { left: 10%; background: #C46A3C; animation-delay: 0s; }
+.confetti-piece:nth-child(2)  { left: 25%; background: #3D8A48; animation-delay: 0.2s; width: 8px; height: 12px; }
+.confetti-piece:nth-child(3)  { left: 40%; background: #DAA440; animation-delay: 0.4s; }
+.confetti-piece:nth-child(4)  { left: 55%; background: #B85C38; animation-delay: 0.1s; width: 12px; height: 8px; }
+.confetti-piece:nth-child(5)  { left: 70%; background: #4D78A0; animation-delay: 0.3s; }
+.confetti-piece:nth-child(6)  { left: 85%; background: #6D501A; animation-delay: 0.5s; width: 8px; height: 12px; }
+.confetti-piece:nth-child(7)  { left: 15%; background: #D4785A; animation-delay: 0.6s; }
+.confetti-piece:nth-child(8)  { left: 60%; background: #52A85B; animation-delay: 0.35s; width: 12px; height: 8px; }
+.confetti-piece:nth-child(9)  { left: 5%;  background: #BC8A30; animation-delay: 0.15s; width: 7px; height: 11px; }
+.confetti-piece:nth-child(10) { left: 20%; background: #3D8A48; animation-delay: 0.45s; }
+.confetti-piece:nth-child(11) { left: 33%; background: #524030; animation-delay: 0.25s; width: 12px; height: 8px; }
+.confetti-piece:nth-child(12) { left: 48%; background: #A85230; animation-delay: 0.55s; width: 8px; height: 12px; }
+.confetti-piece:nth-child(13) { left: 63%; background: #4D78A0; animation-delay: 0.1s; }
+.confetti-piece:nth-child(14) { left: 78%; background: #FFC85C; animation-delay: 0.4s; width: 11px; height: 7px; }
+.confetti-piece:nth-child(15) { left: 92%; background: #52A85B; animation-delay: 0.65s; width: 8px; height: 12px; }
 
 /* ── View enter (tab switch) ── */
 @keyframes view-enter {
@@ -175,7 +205,7 @@ html {
 
 /* ── Empathy card warm glow ── */
 @keyframes empathy-glow {
-  0%, 100% { box-shadow: 0 0 20px rgba(245, 158, 11, 0.15); }
-  50% { box-shadow: 0 0 30px rgba(245, 158, 11, 0.3); }
+  0%, 100% { box-shadow: 0 0 20px rgba(196, 106, 60, 0.15); }
+  50% { box-shadow: 0 0 30px rgba(196, 106, 60, 0.3); }
 }
 .empathy-glow { animation: empathy-glow 3s ease-in-out infinite; }
