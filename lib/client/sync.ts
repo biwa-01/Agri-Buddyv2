@@ -90,7 +90,7 @@ function mergeRecords(local: LocalRecord[], remote: LocalRecord[]): { merged: Lo
       // リモートにない → 追加（要プッシュ）
       map.set(l.id, { ...l, synced: false });
       toPush.push(l);
-    } else if (l.timestamp > existing.timestamp) {
+    } else if (l.timestamp >= existing.timestamp) {
       // ローカルが新しい → ローカル優先（要プッシュ）
       map.set(l.id, { ...l, synced: false });
       toPush.push(l);
@@ -100,6 +100,23 @@ function mergeRecords(local: LocalRecord[], remote: LocalRecord[]): { merged: Lo
 
   const merged = Array.from(map.values()).map(r => ({ ...r, synced: true }));
   return { merged, toPush };
+}
+
+/* ── Force Sync: backup → pull → merge → 全件push → 統合結果返却 ── */
+
+export async function forceSync(uid: string): Promise<{ merged: LocalRecord[]; pushed: number }> {
+  backupRecords();
+  const [remote, local] = await Promise.all([
+    pullRecords(uid),
+    Promise.resolve(loadRecs()),
+  ]);
+
+  const { merged } = mergeRecords(local, remote);
+
+  // 差分ではなく merged 全件をクラウドへ送信
+  await pushRecordsBatch(uid, merged);
+
+  return { merged, pushed: merged.length };
 }
 
 /* ── Full Sync: backup → pull → merge → push差分 → 統合結果返却 ── */

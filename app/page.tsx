@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import {
   Mic, Camera, Download, X,
-  CalendarDays, FileScan, Check,
+  CalendarDays, FileScan, Check, Upload,
 } from 'lucide-react';
 
 import type {
@@ -42,7 +42,7 @@ import { FollowUpBar } from '@/components/features/FollowUpBar';
 import { TabBar } from '@/components/features/TabBar';
 import { EmpathyCard } from '@/components/features/EmpathyCard';
 import { useAuth } from '@/lib/client/auth';
-import { fullSync, pushRecord } from '@/lib/client/sync';
+import { fullSync, forceSync, pushRecord } from '@/lib/client/sync';
 import { LoginButton } from '@/components/features/LoginButton';
 import { SyncBanner } from '@/components/features/SyncBanner';
 
@@ -309,7 +309,25 @@ export default function AgriBuddy() {
     } catch (err) {
       console.error('[sync]', err);
       setSyncStatus('error');
-      const u = getUnsynced(); u.forEach(r => markSync(r.id)); setPendSync(0);
+      setPendSync(getUnsynced().length);
+    }
+  }, [user]);
+
+  const handleForceSync = useCallback(async () => {
+    if (!user) return;
+    if (!window.confirm('ローカルデータをクラウドへ統合しますか？')) return;
+    setSyncStatus('syncing');
+    try {
+      const { merged, pushed } = await forceSync(user.uid);
+      saveAllRecs(merged);
+      setPendSync(0);
+      setHistVer(v => v + 1);
+      setSyncStatus('done');
+      alert(`${pushed}件の送信を完了しました`);
+    } catch (err) {
+      console.error('[forceSync]', err);
+      setSyncStatus('error');
+      alert('同期に失敗しました');
     }
   }, [user]);
 
@@ -1411,6 +1429,18 @@ export default function AgriBuddy() {
           {phase === 'IDLE' && (
             <>
               <SyncBanner onSync={syncRecs} />
+              {user && (
+                <section className="mx-5 mb-4 fade-up">
+                  <button
+                    onClick={handleForceSync}
+                    disabled={syncStatus === 'syncing'}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl border-2 border-terra/60 text-terra font-bold text-sm btn-press disabled:opacity-50"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {syncStatus === 'syncing' ? '同期中...' : '強制再同期（クラウドへ全送信）'}
+                  </button>
+                </section>
+              )}
               {httpsRedirectUrl && (
                 <section className="mx-5 mb-4 fade-up">
                   <a href={httpsRedirectUrl}
