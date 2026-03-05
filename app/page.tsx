@@ -13,7 +13,7 @@ import type {
 } from '@/lib/types';
 import {
   APP_NAME, MAX_LISTEN_MS, BREATHING_MS,
-  SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED,
+  SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_ALIAS_MAP,
   DAY_NAMES,
   GLASS, CARD_FLAT, CARD_ACCENT,
   GUIDED_QUESTIONS,
@@ -31,6 +31,7 @@ import {
   saveMediaBlob, loadMediaForRecord, updateMediaRecordId,
   getCalDays, saveMoodEntry,
   migrateLocations, addLocation, getLocationNames, findLocationByName,
+  loadAliasMap, addAlias, cleanUnusedLocations,
 } from '@/lib/client/storage';
 import { analyzeEmotion } from '@/lib/logic/empathy';
 import { pickNudge } from '@/lib/logic/empathyResponses';
@@ -73,7 +74,6 @@ export default function AgriBuddy() {
   // Dynamic location master
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [isNewLocation, setIsNewLocation] = useState(false);
-  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
 
   // HTTPS誘導
   const [httpsRedirectUrl, setHttpsRedirectUrl] = useState<string | null>(null);
@@ -94,6 +94,7 @@ export default function AgriBuddy() {
 
   // Confirm screen state
   const [confirmCards, setConfirmCards] = useState<ConfirmCard[]>([]);
+  const [confirmNarrative, setConfirmNarrative] = useState('');
   const [recordDate, setRecordDate] = useState('');
 
   // Edit mode
@@ -125,6 +126,7 @@ export default function AgriBuddy() {
 
   // Celebration
   const [showCelebration, setShowCelebration] = useState(false);
+  const [celebExiting, setCelebExiting] = useState(false);
   const [celebrationProfit, setCelebrationProfit] = useState(0);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,6 +167,7 @@ export default function AgriBuddy() {
   const textPrefixRef = useRef('');           // 自動再起動時のテキスト蓄積用
 
   const phaseRef = useRef<Phase>('IDLE');
+  const syncingRef = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { convRef.current = conv; }, [conv]);
@@ -299,9 +302,15 @@ export default function AgriBuddy() {
       u.forEach(r => markSync(r.id)); setPendSync(0);
       return;
     }
+    if (syncingRef.current) return; // 排他ロック
+    syncingRef.current = true;
     setSyncStatus('syncing');
     try {
-      const merged = await fullSync(user.uid);
+      const TIMEOUT = 15_000;
+      const merged = await Promise.race([
+        fullSync(user.uid),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('sync timeout')), TIMEOUT)),
+      ]);
       saveAllRecs(merged);
       setPendSync(0);
       setHistVer(v => v + 1);
@@ -310,15 +319,23 @@ export default function AgriBuddy() {
       console.error('[sync]', err);
       setSyncStatus('error');
       setPendSync(getUnsynced().length);
+    } finally {
+      syncingRef.current = false;
     }
   }, [user]);
 
   const handleForceSync = useCallback(async () => {
     if (!user) return;
+    if (syncingRef.current) return; // 排他ロック
     if (!window.confirm('ローカルデータをクラウドへ統合しますか？')) return;
+    syncingRef.current = true;
     setSyncStatus('syncing');
     try {
-      const { merged, pushed } = await forceSync(user.uid);
+      const TIMEOUT = 15_000;
+      const { merged, pushed } = await Promise.race([
+        forceSync(user.uid),
+        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('forceSync timeout')), TIMEOUT)),
+      ]);
       saveAllRecs(merged);
       setPendSync(0);
       setHistVer(v => v + 1);
@@ -328,6 +345,8 @@ export default function AgriBuddy() {
       console.error('[forceSync]', err);
       setSyncStatus('error');
       alert('同期に失敗しました');
+    } finally {
+      syncingRef.current = false;
     }
   }, [user]);
 
@@ -350,11 +369,14 @@ export default function AgriBuddy() {
     const defaultDate = d.ocr_date || new Date().toISOString().split('T')[0];
 
     if (d.per_location && Array.isArray(d.per_location) && d.per_location.length > 0) {
+      const aliasMap = loadAliasMap();
       return d.per_location.map((pl: Record<string, unknown>, i: number) => {
         const plHouse = pl.house_data as HouseData | null | undefined;
+        const rawLoc = String(pl.location || '');
         return {
           idx: i,
-          location: normalizeLocationName(String(pl.location || '')) || String(pl.location || '') || '場所未定',
+          location: normalizeLocationName(rawLoc, aliasMap) || rawLoc || '場所未定',
+          originalLocation: normalizeLocationName(rawLoc, aliasMap) || rawLoc,
           max_temp: (pl.max_temp as number | null | undefined) ?? plHouse?.max_temp ?? sessionHouse?.max_temp ?? null,
           min_temp: (pl.min_temp as number | null | undefined) ?? plHouse?.min_temp ?? sessionHouse?.min_temp ?? null,
           humidity: plHouse?.humidity ?? sessionHouse?.humidity ?? null,
@@ -364,12 +386,13 @@ export default function AgriBuddy() {
       });
     }
 
-    const loc = normalizeLocationName(locRef.current) || locRef.current;
+    const loc = normalizeLocationName(locRef.current, loadAliasMap()) || locRef.current;
     const slots = buildSlotsFromPending(d);
     const adminText = d.admin_log || generateAdminLog(slots, loc);
     return [{
       idx: -1,
       location: loc || '',
+      originalLocation: loc || '',
       max_temp: sessionHouse?.max_temp ?? null,
       min_temp: sessionHouse?.min_temp ?? null,
       humidity: sessionHouse?.humidity ?? null,
@@ -401,11 +424,14 @@ export default function AgriBuddy() {
       estimated_profit: rec.estimated_profit,
       house_data: rec.house_data,
       photo_count: rec.photo_count,
+      narrative: rec.narrative,
+      insight: rec.insight,
     };
 
     const card: ConfirmCard = {
       idx: 0,
       location: rec.location || '',
+      originalLocation: rec.location || '',
       max_temp: rec.house_data?.max_temp ?? null,
       min_temp: rec.house_data?.min_temp ?? null,
       humidity: rec.house_data?.humidity ?? null,
@@ -415,6 +441,7 @@ export default function AgriBuddy() {
     setConfirmCards([card]);
     setRecordDate(rec.date);
     setEditingRecordIds([rec.id]);
+    setConfirmNarrative(rec.narrative || '');
     setPhase('CONFIRM');
     setView('record');
   }, [clr]);
@@ -448,6 +475,7 @@ export default function AgriBuddy() {
       }
 
       setConfirmCards(cards);
+      setConfirmNarrative(pendingDataRef.current.narrative || '');
       setRecordDate(d.ocr_date || new Date().toISOString().split('T')[0]);
       setPhase('CONFIRM');
 
@@ -559,13 +587,18 @@ export default function AgriBuddy() {
           harvest_amount: d.harvest_amount || '', material_cost: d.material_cost || '',
           work_duration: d.work_duration || '', fuel_cost: d.fuel_cost || '',
           strategic_advice: d.strategic_advice || '', pesticide_detail: d.pesticide_detail || '',
+          narrative: d.narrative || undefined, insight: d.insight || undefined,
           photo_count: d.photo_count ?? 0, estimated_profit: d.estimated_profit ?? undefined,
           raw_transcript: d.raw_transcript || undefined, location_id: locMaster?.id,
           synced: false, timestamp: Date.now(),
         };
         saveRecLS(rec);
         if (user) pushRecord(user.uid, rec).catch(e => console.error('[sync] push:', e));
-        if (loc) addLocation(loc);
+        if (loc) {
+          addLocation(loc);
+          const original = card.originalLocation || '';
+          if (original && original !== loc) addAlias(original, loc);
+        }
       }
       setEditingRecordIds([]);
       setPendSync(p => p + confirmCards.length);
@@ -595,6 +628,7 @@ export default function AgriBuddy() {
             fuel_cost: pl.fuel_cost || '',
             strategic_advice: pl.strategic_advice || generateStrategicAdvice(slots),
             pesticide_detail: pl.pesticide_detail || '',
+            narrative: d.narrative || undefined, insight: d.insight || undefined,
             photo_count: 0,
             raw_transcript: d.raw_transcript || undefined,
             location_id: locMaster?.id,
@@ -604,6 +638,8 @@ export default function AgriBuddy() {
           if (user) pushRecord(user.uid, rec).catch(e => console.error('[sync] push:', e));
           if (loc) {
             addLocation(loc);
+            const original = card.originalLocation || '';
+            if (original && original !== loc) addAlias(original, loc);
             saveSession({ location: loc, work: pl.work_log || '', date: dateStr });
           }
         }
@@ -631,6 +667,7 @@ export default function AgriBuddy() {
           material_cost: d.material_cost || '', work_duration: d.work_duration || '',
           fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
           pesticide_detail: d.pesticide_detail || '',
+          narrative: d.narrative || undefined, insight: d.insight || undefined,
           photo_count: photoCount, estimated_profit: profit.total,
           raw_transcript: d.raw_transcript || undefined,
           location_id: locMaster?.id,
@@ -638,6 +675,11 @@ export default function AgriBuddy() {
         };
         saveRecLS(rec); setPendSync(p => p + 1);
         if (user) pushRecord(user.uid, rec).catch(e => console.error('[sync] push:', e));
+        if (loc) {
+          addLocation(loc);
+          const original = card?.originalLocation || '';
+          if (original && original !== loc) addAlias(original, loc);
+        }
         saveSession({ location: loc, work: d.work_log || '', date: dateStr });
         updateMediaRecordId(pendingMediaId, rec.id).catch(() => {});
       }
@@ -716,7 +758,11 @@ export default function AgriBuddy() {
     const profit = calculateProfitPreview(pendingDataRef.current);
     setCelebrationProfit(profit.total);
     setShowCelebration(true);
-    setTimeout(() => setShowCelebration(false), 5000);
+    setCelebExiting(false);
+    setTimeout(() => {
+      setCelebExiting(true);
+      setTimeout(() => { setShowCelebration(false); setCelebExiting(false); }, 400);
+    }, 4600);
 
     if (profit.total > 0) {
       const yen = profit.total >= 10000 ? `${(profit.total / 10000).toFixed(1)}万円` : `${profit.total.toLocaleString()}円`;
@@ -742,6 +788,17 @@ export default function AgriBuddy() {
     setConfirmCards(prev => prev.map(c =>
       c.idx === idx ? { ...c, [field]: value } : c
     ));
+  }, []);
+
+  /* ── Update narrative ── */
+  const updateNarrative = useCallback((v: string) => {
+    setConfirmNarrative(v);
+    pendingDataRef.current.narrative = v;
+  }, []);
+
+  /* ── Delete confirm card ── */
+  const deleteConfirmCard = useCallback((idx: number) => {
+    setConfirmCards(prev => prev.filter(c => c.idx !== idx));
   }, []);
 
   /* ── Start Listening ── */
@@ -817,10 +874,31 @@ export default function AgriBuddy() {
 
         recogRef.current = null;
 
-        // follow-up中: 既存動作を維持
+        // follow-up中: ユーザー停止でなければ自動再起動
         if (followUpActiveRef.current) {
-          if (spoke) sasRef.current();
-          else setPhase('FOLLOW_UP');
+          if (userStoppedRef.current) {
+            if (spoke) sasRef.current();
+            else setPhase('FOLLOW_UP');
+            return;
+          }
+          // 無音でブラウザがonend発火 → 再起動試行
+          textPrefixRef.current = chunksRef.current;
+          setTimeout(() => {
+            if (userStoppedRef.current || recogRef.current || !followUpActiveRef.current) return;
+            try {
+              const r2 = createRecog(); if (!r2) { setPhase('FOLLOW_UP'); return; }
+              resultOffsetRef.current = 0;
+              r2.onresult = r.onresult;
+              r2.onerror = r.onerror;
+              r2.onend = r.onend;
+              r2.start();
+              recogRef.current = r2;
+              maxRef.current = setTimeout(() => { sasRef.current(); }, MAX_LISTEN_MS);
+            } catch {
+              recogRef.current = null;
+              setPhase('FOLLOW_UP');
+            }
+          }, 300);
           return;
         }
 
@@ -837,9 +915,16 @@ export default function AgriBuddy() {
               r2.onend = r.onend;
               r2.start();
               recogRef.current = r2;
+              maxRef.current = setTimeout(() => {
+                if (persistentRecogRef.current) {
+                  sasRef.current();
+                } else {
+                  try { recogRef.current?.stop(); } catch {}
+                }
+              }, MAX_LISTEN_MS);
             } catch {
               recogRef.current = null;
-              if (spoke) sasRef.current();
+              // 再起動失敗: LISTENING状態を維持、ユーザーがマイクタップで再開可能
             }
           }, 300);
           return;
@@ -900,7 +985,7 @@ export default function AgriBuddy() {
       (async () => {
         try {
           const allText = rawTranscriptRef.current.join('\n');
-          const locations = pendingDataRef.current.locations || selectedLocations;
+          const locations = pendingDataRef.current.locations || [];
           const res = await fetch('/api/diagnose', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -966,17 +1051,24 @@ export default function AgriBuddy() {
         });
       }, breathMs);
     }
-  }, [startListen, showConfirmScreen, outdoor, selectedLocations]);
+  }, [startListen, showConfirmScreen, outdoor]);
 
   useEffect(() => { advanceFollowUpRef.current = advanceFollowUp; }, [advanceFollowUp]);
 
-  /* ── Map missing_questions to new 3-category follow-up ── */
-  const mapToFollowUp = (mq: string[], hasLocation: boolean): FollowUpStep[] => {
+  /* ── Map missing_questions to new 4-category follow-up ── */
+  const mapToFollowUp = (mq: string[], hasLocation: boolean, conf?: 'low' | 'medium' | 'high'): FollowUpStep[] => {
     const steps: FollowUpStep[] = [];
     if (!hasLocation) steps.push('LOCATION');
     if (mq.includes('WORK')) steps.push('WORK');
     if (mq.includes('FERTILIZER') || mq.includes('PEST')) steps.push('MATERIALS');
-    return steps;
+    if (mq.includes('HOUSE_TEMP') || mq.includes('HARVEST') || mq.includes('COST') || mq.includes('DURATION')) {
+      steps.push('DETAILS');
+    }
+    // Confidence secondary trigger: lowなのにqueue空 → 最低限WORKを聞く
+    if (steps.length === 0 && conf === 'low') {
+      steps.push('WORK');
+    }
+    return steps.slice(0, 3);
   };
 
   /* ── Stop & Send ── */
@@ -1033,6 +1125,7 @@ export default function AgriBuddy() {
             break;
           case 'WORK':
           case 'MATERIALS':
+          case 'DETAILS':
             // rawTranscriptRefに蓄積済み（上のpush）、個別格納不要
             break;
         }
@@ -1098,7 +1191,6 @@ export default function AgriBuddy() {
         body: JSON.stringify({
           text, context: uc,
           location: locOvr || locRef.current,
-          locations: selectedLocations.length > 0 ? selectedLocations : undefined,
           outdoor, knownLocations: getLocationNames(),
         }),
       });
@@ -1146,14 +1238,11 @@ export default function AgriBuddy() {
 
       try {
         pendingDataRef.current = { ...d };
-        if (selectedLocations.length > 0) {
-          pendingDataRef.current.locations = [...selectedLocations];
-        }
 
         // missing_questionsを新3カテゴリにマッピング
-        const hasLocation = !!(selectedLocations.length > 0 || d.new_location || locRef.current);
+        const hasLocation = !!(d.new_location || locRef.current);
         const mq = Array.isArray(d.missing_questions) ? d.missing_questions as string[] : [];
-        const queue = mapToFollowUp(mq, hasLocation);
+        const queue = mapToFollowUp(mq, hasLocation, d.confidence);
 
         if (queue.length > 0) {
           followUpActiveRef.current = true;
@@ -1163,7 +1252,10 @@ export default function AgriBuddy() {
           advanceFollowUpRef.current();
         } else {
           // 全項目十分 → follow-upスキップ、CONFIRM直行
-          speak('バッチリ全部入ってます！確認画面へいきますね。');
+          const skipMsg = d.confidence === 'high'
+            ? 'バッチリ全部入ってます！確認画面へいきますね。'
+            : '確認画面へいきますね。';
+          speak(skipMsg);
           showConfirmScreen();
         }
       } catch (err) {
@@ -1175,7 +1267,7 @@ export default function AgriBuddy() {
       setAiReply('通信に失敗しました。ネットワークを確認して、もう一度話しかけてください。'); setPhase('IDLE');
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clr, syncRecs, photoCount, showConfirmScreen, startListen, selectedLocations]);
+  }, [clr, syncRecs, photoCount, showConfirmScreen, startListen]);
 
   useEffect(() => { sasRef.current = stopAndSend; }, [stopAndSend]);
 
@@ -1231,12 +1323,9 @@ export default function AgriBuddy() {
     photoWaitingRef.current = false;
     emptyRetryRef.current = 0;
     pendingDataRef.current = {};
-    if (selectedLocations.length > 0) {
-      pendingDataRef.current.locations = [...selectedLocations];
-    }
     setTranscript(''); setAiReply(''); setConv([]); setProfitPreview(null);
     setPhotoCount(0); setTodayHouse(null); setTodayAdvice(''); setTodayLog('');
-    setBump(null); setConfidence(null); setConfirmCards([]); setRecordDate(''); setFollowUpInfo(null);
+    setBump(null); setConfidence(null); setConfirmCards([]); setConfirmNarrative(''); setRecordDate(''); setFollowUpInfo(null);
     setMentorDraft(''); setMentorCopied(false); setMentorStep('comfort'); setConsultSheet('');
     mediaPreview.forEach(m => URL.revokeObjectURL(m.url));
     setMediaPreview([]);
@@ -1246,7 +1335,7 @@ export default function AgriBuddy() {
     followUpActiveRef.current = false;
     speak('今日のこと、なんでも聞かせてください。').then(() => startListen());
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clr, startListen, selectedLocations]);
+  }, [clr, startListen]);
 
   /* ── Begin Session ── */
   const begin = useCallback(() => {
@@ -1328,12 +1417,20 @@ export default function AgriBuddy() {
     setReportText(text); setReportType(type); setShowReport(true); setReportFullscreen(true);
   }, []);
 
+  const handleCleanLocations = useCallback(() => {
+    const count = cleanUnusedLocations();
+    setLocationOptions(getLocationNames());
+    if (count > 0) window.alert(`${count}件の未使用場所を削除しました。`);
+    else window.alert('未使用の場所はありません。');
+  }, []);
+
   const handleResetData = useCallback(() => {
     if (window.confirm('すべてのきろくをけします。もとにもどせません。よろしいですか？')) {
       if (window.confirm('ほんとうにけしますか？')) {
         localStorage.removeItem(SK_RECORDS);
         localStorage.removeItem(SK_SESSION);
         localStorage.removeItem(SK_DEEP_CLEANED);
+        localStorage.removeItem(SK_ALIAS_MAP);
         setHistVer(v => v + 1);
         setCalDate(null);
       }
@@ -1407,8 +1504,11 @@ export default function AgriBuddy() {
               onUpdateCard={updateConfirmCard}
               onDateChange={setRecordDate}
               onSave={saveFromConfirm} onReset={reset}
+              onDeleteCard={deleteConfirmCard}
               saving={saving}
               isEditMode={editingRecordIds.length > 0}
+              narrative={confirmNarrative}
+              onNarrativeChange={updateNarrative}
             />
           )}
 
@@ -1601,33 +1701,6 @@ export default function AgriBuddy() {
 
               {/* ═══ MIC BUTTON (Record View) ═══ */}
               <>
-                {/* ── 場所チェックボックス（IDLE時のみ） ── */}
-                {phase === 'IDLE' && locationOptions.length > 0 && (
-                  <div className={`w-full mb-6 p-4 rounded-2xl ${CARD_FLAT}`}>
-                    <p className="text-sm font-bold text-stone-500 mb-2">作業場所（複数選択可）</p>
-                    <div className="flex flex-wrap gap-2">
-                      {locationOptions.map(loc => (
-                        <label key={loc} className={`flex items-center gap-2 px-3 py-2 rounded-xl border cursor-pointer btn-press ${
-                          selectedLocations.includes(loc)
-                            ? 'bg-amber-100 border-amber-400 text-amber-800'
-                            : 'bg-white/60 border-stone-200 text-stone-600'
-                        }`}>
-                          <input
-                            type="checkbox"
-                            checked={selectedLocations.includes(loc)}
-                            onChange={e => {
-                              if (e.target.checked) setSelectedLocations(p => [...p, loc]);
-                              else setSelectedLocations(p => p.filter(l => l !== loc));
-                            }}
-                            className="w-4 h-4 accent-amber-500"
-                          />
-                          <span className="text-base font-bold">{loc}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 <div className="relative">
                   {(phase === 'LISTENING' || phase === 'FOLLOW_UP') && <div className="absolute inset-0 rounded-full bg-amber-400/30 listening-ring" />}
                   <button
@@ -1639,7 +1712,7 @@ export default function AgriBuddy() {
                           w-[24vh] h-[24vh] max-w-64 max-h-64
                           transition-all duration-300 select-none touch-none btn-press
                           ${phase === 'LISTENING'
-                            ? 'bg-gradient-to-br from-red-500 to-red-600 scale-105 shadow-[0_0_60px_rgba(239,68,68,0.4)]'
+                            ? 'bg-gradient-to-br from-red-500 to-red-600 mic-activate shadow-[0_0_60px_rgba(239,68,68,0.4)]'
                             : phase === 'THINKING'
                               ? 'bg-stone-300/80 backdrop-blur-xl animate-pulse cursor-wait'
                               : phase === 'BREATHING'
@@ -1720,7 +1793,7 @@ export default function AgriBuddy() {
           todayISO={todayISO} recordMap={recordMap} calSelected={calSelected}
           selectedMedia={selectedMedia} setFullscreenMedia={setFullscreenMedia}
           setView={setView} onShowReport={handleShowReport} onResetData={handleResetData}
-          onEditRecord={startEditRecord}
+          onEditRecord={startEditRecord} onCleanLocations={handleCleanLocations}
         />
       )}
 
@@ -1731,7 +1804,7 @@ export default function AgriBuddy() {
 
       {/* ═══ CELEBRATION OVERLAY ═══ */}
       {showCelebration && (
-        <CelebrationOverlay celebrationProfit={celebrationProfit} />
+        <CelebrationOverlay celebrationProfit={celebrationProfit} exiting={celebExiting} />
       )}
 
       {/* ═══ EMPATHY CARD (Tier 2) ═══ */}

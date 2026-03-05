@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useState, useMemo, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, ChevronDown, Mic, Sprout, TrendingUp, Search, X, MapPin, Pencil } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Mic, Sprout, TrendingUp, Search, X, MapPin, Pencil, BookOpen } from 'lucide-react';
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
 import type { LocalRecord, View } from '@/lib/types';
 import { GLASS, CARD_FLAT, DAY_NAMES, GENERIC_ADVICE_RE } from '@/lib/constants';
-import { fmtVal, extractNextActions, sanitizeLocation, extractCorrections, buildRecordChips, normalizeLocationName } from '@/lib/logic/extraction';
+import { fmtVal, extractNextActions, sanitizeLocation, buildRecordChips, normalizeLocationName } from '@/lib/logic/extraction';
 import { generateCultivationReport, generatePesticideReport } from '@/lib/logic/report';
-import { loadRecs } from '@/lib/client/storage';
+import { loadRecs, loadAliasMap } from '@/lib/client/storage';
 import { ChartTooltip } from '@/components/ui/ChartTooltip';
 import { Linkify } from '@/components/ui/Linkify';
 
@@ -52,7 +52,7 @@ const FILTER_CHIPS = [
 const SEARCH_FIELDS: (keyof LocalRecord)[] = [
   'work_log', 'fertilizer', 'pest_status', 'harvest_amount',
   'material_cost', 'fuel_cost', 'work_duration', 'plant_status',
-  'location', 'admin_log', 'raw_transcript', 'advice', 'strategic_advice',
+  'location', 'admin_log', 'raw_transcript', 'advice', 'strategic_advice', 'narrative',
 ];
 
 interface HistoryViewProps {
@@ -72,13 +72,14 @@ interface HistoryViewProps {
   onShowReport: (text: string, type: 'month' | 'half') => void;
   onResetData: () => void;
   onEditRecord: (rec: LocalRecord) => void;
+  onCleanLocations: () => void;
 }
 
 export function HistoryView({
   hasChartData, trendData,
   calMonth, setCalMonth, calDays, calDate, setCalDate, todayISO,
   recordMap, calSelected, selectedMedia, setFullscreenMedia,
-  setView, onShowReport, onResetData, onEditRecord,
+  setView, onShowReport, onResetData, onEditRecord, onCleanLocations,
 }: HistoryViewProps) {
 
   /* ── Filter state ── */
@@ -87,6 +88,7 @@ export function HistoryView({
   const [showLocationChips, setShowLocationChips] = useState(false);
   const [activeLocations, setActiveLocations] = useState<Set<string>>(new Set());
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
+  const [openNarrativeId, setOpenNarrativeId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -106,12 +108,13 @@ export function HistoryView({
 
   /* ── Available locations ── */
   const availableLocations = useMemo(() => {
+    const aliasMap = loadAliasMap();
     const locs = new Set<string>();
     for (const r of allRecords) {
       const loc = r.location;
       if (!loc || typeof loc !== 'string' || !sanitizeLocation(loc)) continue;
       if (loc === '場所未定') continue;
-      const normalized = normalizeLocationName(loc);
+      const normalized = normalizeLocationName(loc, aliasMap);
       if (!normalized) continue;
       locs.add(normalized);
     }
@@ -136,7 +139,7 @@ export function HistoryView({
         }
         // Location: OR (normalize for matching old records)
         if (activeLocations.size > 0) {
-          const normLoc = normalizeLocationName(r.location || '') || r.location || '';
+          const normLoc = normalizeLocationName(r.location || '', loadAliasMap()) || r.location || '';
           if (!activeLocations.has(normLoc)) return false;
         }
         // Text search: AND (all terms must match)
@@ -423,7 +426,12 @@ export function HistoryView({
             </button>
           </div>
 
-          <div className="mt-4 text-center">
+          <div className="mt-4 text-center space-y-2">
+            <button onClick={onCleanLocations}
+              className="text-xs text-stone-400 hover:text-amber-600 transition-colors">
+              未使用の場所を整理
+            </button>
+            <br />
             <button onClick={onResetData} className="text-xs text-stone-400 hover:text-red-400 transition-colors">
               データをすべてリセット
             </button>
@@ -445,11 +453,12 @@ export function HistoryView({
             </div>
             {filteredRecords && filteredRecords.length > 0 ? (
               <div className="max-h-[40vh] overflow-y-auto no-scrollbar space-y-2">
-                {filteredRecords.map(rec => (
+                {filteredRecords.map((rec, i) => (
                   <button
                     key={rec.id}
                     onClick={() => navigateToRecord(rec)}
-                    className={`w-full text-left p-3 rounded-xl ${CARD_FLAT} hover:bg-white/80 btn-press transition-colors`}
+                    className={`card-bounce w-full text-left p-3 rounded-xl ${CARD_FLAT} hover:bg-white/80 btn-press transition-colors`}
+                    style={{ animationDelay: `${Math.min(i, 10) * 50}ms` }}
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-base font-bold text-stone-800">{rec.date}</span>
@@ -465,6 +474,9 @@ export function HistoryView({
                       {rec.fertilizer && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">施肥</span>}
                       {rec.pest_status && <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 text-xs font-bold">防除</span>}
                     </div>
+                    {rec.insight && (
+                      <p className="text-sm text-stone-500 mt-1 line-clamp-1">{'\u{1F4A1}'} {rec.insight}</p>
+                    )}
                   </button>
                 ))}
               </div>
@@ -490,7 +502,8 @@ export function HistoryView({
             <p className="text-sm font-bold text-stone-500 px-5 mb-2">{calSelected.length}件の記録</p>
           )}
           {calSelected.map((rec, idx) => (
-          <div key={rec.id} className={`p-5 rounded-2xl ${GLASS} ${idx > 0 ? 'mt-3' : ''}`}>
+          <div key={rec.id} className={`card-bounce ${idx > 0 ? 'mt-3' : ''}`} style={{ animationDelay: `${idx * 100}ms` }}>
+          <div className={`p-5 rounded-2xl ${GLASS}`}>
             <div className="flex items-center justify-between mb-2">
               {rec.location ? (
                 <p className="text-base font-bold text-amber-600 flex items-center gap-1">
@@ -566,19 +579,26 @@ export function HistoryView({
                 <pre className="text-xl font-medium text-blue-900 whitespace-pre-wrap leading-relaxed font-serif">{rec.admin_log}</pre>
               </div>
             )}
-            {/* ── AI補正バッジ ── */}
-            {rec.raw_transcript && (() => {
-              const corrections = extractCorrections(rec.raw_transcript ?? '');
-              if (corrections.length === 0) return null;
+            {/* ── 今日の振り返り（narrative toggle） ── */}
+            {rec.narrative && (() => {
+              const isOpen = openNarrativeId === rec.id;
               return (
-                <div className="flex flex-wrap gap-1.5 mt-2 mb-3">
-                  {corrections.map((c, i) => (
-                    <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-200">
-                      <span className="line-through opacity-60">{c.original}</span>
-                      <span className="mx-0.5">{'\u2192'}</span>
-                      <span className="font-bold">{c.corrected}</span>
-                    </span>
-                  ))}
+                <div className="mt-3">
+                  <button
+                    onClick={() => setOpenNarrativeId(isOpen ? null : rec.id)}
+                    className="flex items-center gap-2 text-base font-bold text-amber-700 hover:text-amber-800 btn-press"
+                  >
+                    <BookOpen className="w-4 h-4" />
+                    今日の振り返り
+                    <ChevronDown className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {isOpen && (
+                    <div className="mt-2 p-4 rounded-xl bg-amber-50 border border-amber-200 shadow-md card-bounce sticky-note">
+                      <p className="text-lg font-medium text-amber-900 leading-relaxed font-serif">
+                        {rec.narrative}
+                      </p>
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -626,11 +646,10 @@ export function HistoryView({
             })()}
             {(rec.strategic_advice || rec.advice) && (() => {
               const isGeneric = GENERIC_ADVICE_RE.test(rec.advice || '') && GENERIC_ADVICE_RE.test(rec.strategic_advice || '');
-              if (isGeneric) return (
-                <div className="mt-3 p-3 rounded-xl bg-stone-50/50 border border-stone-200/30">
-                  <p className="text-base font-medium text-stone-400">詳細を入力すると分析が表示されます</p>
-                </div>
-              );
+              if (isGeneric) return null;
+              const strategicTrimmed = (rec.strategic_advice || '').trim();
+              const adviceTrimmed = (rec.advice || '').trim();
+              if (strategicTrimmed.length + adviceTrimmed.length < 20) return null;
               const { analysisOnly, actions } = extractNextActions(rec.advice || '', rec.strategic_advice || '');
               const strategicLines = (rec.strategic_advice || '').split('\n').filter(l => !/^次回:\s*/.test(l)).join('\n').trim();
 
@@ -674,6 +693,7 @@ export function HistoryView({
                 ) : null}
               </>);
             })()}
+          </div>
           </div>
           ))}
         </section>

@@ -1,4 +1,4 @@
-import { AGRI_CORRECTIONS, WORK_CHIPS, NAV_NOISE_RE, FILLER_RE, LOCATION_GHOST_RE } from '@/lib/constants';
+import { AGRI_CORRECTIONS, WORK_CHIPS, NAV_NOISE_RE, FILLER_RE, LOCATION_GHOST_RE, LOCATION_BLACKLIST } from '@/lib/constants';
 import type { PartialSlots, LocalRecord } from '@/lib/types';
 import { isNegativeInput } from '@/lib/logic/advice';
 
@@ -13,10 +13,17 @@ export function toKatakana(s: string): string {
   return s.replace(/[\u3041-\u3096]/g, c => String.fromCharCode(c.charCodeAt(0) + 0x60));
 }
 
-export function normalizeLocationName(raw: string): string {
+export function normalizeLocationName(raw: string, aliasMap?: Record<string, string>): string {
   if (!raw || typeof raw !== 'string') return '';
+  if (LOCATION_BLACKLIST.some(bl => raw.includes(bl))) return '';
   for (const [re, normalized] of LOCATION_NORMALIZE_MAP) {
     if (re.test(raw)) return normalized;
+  }
+  if (aliasMap) {
+    const trimmed = raw.trim();
+    if (aliasMap[trimmed]) return aliasMap[trimmed];
+    const kata = toKatakana(trimmed);
+    if (aliasMap[kata]) return aliasMap[kata];
   }
   return toKatakana(raw.trim());
 }
@@ -146,6 +153,7 @@ export function correctForLog(text: string): string {
 export function sanitizeLocation(loc: string): string {
   if (LOCATION_GHOST_RE.test(loc)) return '';
   if (/[はがをのにでもへとてで](?:ハウス|畑|園|圃場)$/.test(loc)) return '';
+  if (LOCATION_BLACKLIST.some(bl => loc.includes(bl))) return '';
   return loc;
 }
 

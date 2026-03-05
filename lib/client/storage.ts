@@ -1,5 +1,5 @@
 import type { LocalRecord, LastSession, LocationMaster, EmotionAnalysis, MoodEntry, OutdoorWeather } from '@/lib/types';
-import { SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_MOOD, SK_LOCATIONS, MEDIA_DB, MEDIA_STORE } from '@/lib/constants';
+import { SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_MOOD, SK_LOCATIONS, SK_ALIAS_MAP, MEDIA_DB, MEDIA_STORE } from '@/lib/constants';
 import { isValidTemp, isValidHumidity } from '@/lib/logic/validation';
 import { normalizeLocationName } from '@/lib/logic/extraction';
 
@@ -117,6 +117,49 @@ export function deepClean() {
   } catch { /* ignore */ }
 }
 
+/* ── Alias Map ── */
+export function loadAliasMap(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(SK_ALIAS_MAP) || '{}'); }
+  catch { return {}; }
+}
+
+function saveAliasMap(map: Record<string, string>) {
+  localStorage.setItem(SK_ALIAS_MAP, JSON.stringify(map));
+}
+
+export function addAlias(rawName: string, canonicalName: string) {
+  if (!rawName || !canonicalName || rawName === canonicalName) return;
+  const map = loadAliasMap();
+  map[rawName] = canonicalName;
+  saveAliasMap(map);
+  const masters = loadLocationMaster();
+  const master = masters.find(m => m.name === canonicalName);
+  if (master && !master.aliases.includes(rawName)) {
+    master.aliases.push(rawName);
+    saveLocationMaster(masters);
+  }
+}
+
+export function cleanUnusedLocations(): number {
+  const recs = loadRecs();
+  const used = new Set<string>();
+  const aliasMap = loadAliasMap();
+  for (const r of recs) {
+    if (r.location) used.add(normalizeLocationName(r.location, aliasMap));
+  }
+  const masters = loadLocationMaster();
+  const kept = masters.filter(m => used.has(m.name));
+  const removed = masters.length - kept.length;
+  if (removed > 0) saveLocationMaster(kept);
+  const keptNames = new Set(kept.map(m => m.name));
+  const cleanedMap: Record<string, string> = {};
+  for (const [raw, canonical] of Object.entries(aliasMap)) {
+    if (keptNames.has(canonical)) cleanedMap[raw] = canonical;
+  }
+  saveAliasMap(cleanedMap);
+  return removed;
+}
+
 /* ── Location Master ── */
 export function loadLocationMaster(): LocationMaster[] {
   try { return JSON.parse(localStorage.getItem(SK_LOCATIONS) || '[]'); }
@@ -129,7 +172,7 @@ export function saveLocationMaster(masters: LocationMaster[]) {
 
 export function addLocation(name: string, alias?: string): LocationMaster {
   const masters = loadLocationMaster();
-  const normalized = normalizeLocationName(name);
+  const normalized = normalizeLocationName(name, loadAliasMap());
   if (!normalized) return masters[0] || { id: '', name: '', aliases: [], createdAt: 0 };
   const existing = masters.find(m => m.name === normalized);
   if (existing) {
@@ -151,9 +194,10 @@ export function addLocation(name: string, alias?: string): LocationMaster {
 }
 
 export function findLocationByName(name: string): LocationMaster | undefined {
-  const normalized = normalizeLocationName(name);
+  const aliasMap = loadAliasMap();
+  const normalized = normalizeLocationName(name, aliasMap);
   return loadLocationMaster().find(m =>
-    m.name === normalized || m.aliases.some(a => normalizeLocationName(a) === normalized)
+    m.name === normalized || m.aliases.some(a => normalizeLocationName(a, aliasMap) === normalized)
   );
 }
 
@@ -164,11 +208,12 @@ export function getLocationNames(): string[] {
 export function migrateLocations() {
   if (loadLocationMaster().length > 0) return;
   const recs = loadRecs();
+  const aliasMap = loadAliasMap();
   const seen = new Set<string>();
   for (const r of recs) {
     const loc = r.location;
     if (!loc || loc === '場所未定' || seen.has(loc)) continue;
-    const normalized = normalizeLocationName(loc);
+    const normalized = normalizeLocationName(loc, aliasMap);
     if (!normalized || seen.has(normalized)) continue;
     seen.add(normalized);
     addLocation(normalized, loc !== normalized ? loc : undefined);

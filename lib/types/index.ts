@@ -42,6 +42,7 @@ export interface PerLocationRecord {
 export interface ConfirmCard {
   idx: number;
   location: string;
+  originalLocation: string;
   max_temp: number | null;
   min_temp: number | null;
   humidity: number | null;
@@ -60,6 +61,8 @@ export interface ApiResponse {
   work_duration?: string; fuel_cost?: string;
   estimated_revenue?: number;
   pesticide_detail?: string;
+  narrative?: string;
+  insight?: string;
   new_location?: string;
   error?: string;
   mentor_mode?: boolean;
@@ -79,6 +82,7 @@ export interface LocalRecord {
   work_duration: string; fuel_cost: string;
   strategic_advice: string; photo_count: number;
   pesticide_detail?: string;
+  narrative?: string; insight?: string;
   estimated_profit?: number; raw_transcript?: string;
   location_id?: string;
   synced: boolean; timestamp: number;
@@ -86,7 +90,7 @@ export interface LocalRecord {
 
 export interface LastSession { location: string; work: string; date: string; }
 
-export type FollowUpStep = 'LOCATION' | 'WORK' | 'MATERIALS';
+export type FollowUpStep = 'LOCATION' | 'WORK' | 'MATERIALS' | 'DETAILS';
 
 export interface ConfirmItem {
   key: string;

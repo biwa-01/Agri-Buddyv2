@@ -14,16 +14,17 @@ const NAGASAKI_MESSAGES = [
 
 interface CelebrationOverlayProps {
   celebrationProfit: number;
+  exiting?: boolean;
 }
 
-export function CelebrationOverlay({ celebrationProfit }: CelebrationOverlayProps) {
+export function CelebrationOverlay({ celebrationProfit, exiting }: CelebrationOverlayProps) {
   const message = useMemo(
     () => NAGASAKI_MESSAGES[Math.floor(Math.random() * NAGASAKI_MESSAGES.length)],
     []
   );
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-sm">
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-stone-900/60 backdrop-blur-sm ${exiting ? 'celebration-out' : ''}`}>
       {Array.from({ length: 15 }, (_, i) => <span key={i} className="confetti-piece" />)}
       <div className="celebration-pop flex flex-col items-center gap-4 p-8">
         <div className="w-24 h-24 rounded-full bg-green-500 flex items-center justify-center shadow-[0_0_60px_rgba(34,197,94,0.5)]">

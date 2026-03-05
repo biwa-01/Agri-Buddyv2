@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { HandHeart, X } from 'lucide-react';
 import type { EmotionAnalysis, OutdoorWeather } from '@/lib/types';
 import { getComfort, getWeatherCare } from '@/lib/logic/empathyResponses';
@@ -14,11 +14,18 @@ interface Props {
 
 export function EmpathyCard({ emotion, outdoor, onDismiss }: Props) {
   const [visible, setVisible] = useState(true);
+  const [exiting, setExiting] = useState(false);
+
+  const startExit = useCallback(() => {
+    if (exiting) return;
+    setExiting(true);
+    setTimeout(() => { setVisible(false); onDismiss(); }, 300);
+  }, [exiting, onDismiss]);
 
   useEffect(() => {
-    const timer = setTimeout(() => { setVisible(false); onDismiss(); }, 15000);
+    const timer = setTimeout(startExit, 14700);
     return () => clearTimeout(timer);
-  }, [onDismiss]);
+  }, [startExit]);
 
   if (!visible) return null;
 
@@ -27,9 +34,9 @@ export function EmpathyCard({ emotion, outdoor, onDismiss }: Props) {
   const weatherTip = outdoor ? getWeatherCare(outdoor.temperature) : null;
 
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center pb-8 px-4" onClick={onDismiss}>
+    <div className="fixed inset-0 z-40 flex items-end justify-center pb-8 px-4" onClick={startExit}>
       <div
-        className={`w-full max-w-lg rounded-2xl p-6 ${GLASS} bg-amber-50/85 border-amber-200/40 empathy-glow fade-up`}
+        className={`w-full max-w-lg rounded-2xl p-6 ${GLASS} bg-amber-50/85 border-amber-200/40 empathy-glow ${exiting ? 'empathy-out' : 'fade-up'}`}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-start justify-between mb-3">
@@ -39,7 +46,7 @@ export function EmpathyCard({ emotion, outdoor, onDismiss }: Props) {
             </div>
             <h3 className="text-xl font-bold text-stone-800">{content.title}</h3>
           </div>
-          <button onClick={onDismiss} className="p-1.5 rounded-full hover:bg-stone-200/50 btn-press">
+          <button onClick={startExit} className="p-1.5 rounded-full hover:bg-stone-200/50 btn-press">
             <X className="w-5 h-5 text-stone-400" />
           </button>
         </div>
@@ -59,7 +66,7 @@ export function EmpathyCard({ emotion, outdoor, onDismiss }: Props) {
         )}
 
         <button
-          onClick={onDismiss}
+          onClick={startExit}
           className="w-full py-3 rounded-xl bg-amber-500/90 text-white text-lg font-bold btn-press hover:bg-amber-600/90 transition-colors"
         >
           分かった

@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       .map(m => `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${m.text}`)
       .join('\n');
 
-    const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, ADMIN_LOG_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
+    const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, ADMIN_LOG_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, NARRATIVE_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
 
     const weatherSection = outdoor
       ? `\n【本日の天気】${outdoor.description} ${outdoor.temperature}℃\n`
@@ -67,6 +67,8 @@ ${ADMIN_LOG_RULES}
 ${ADVICE_RULES}
 
 ${REVENUE_ESTIMATION_RULES}
+
+${NARRATIVE_RULES}
 ${weatherSection}${locationSection}
 【会話履歴】
 ${contextStr}
