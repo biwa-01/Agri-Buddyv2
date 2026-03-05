@@ -10,7 +10,12 @@ import { loadRecs, backupRecords } from '@/lib/client/storage';
 function toFirestoreDoc(rec: LocalRecord): Record<string, unknown> {
   // synced はローカル専用フラグ → Firestoreには書かない
   const { synced: _, ...rest } = rec;
-  return { ...rest, updatedAt: Date.now() };
+  const obj: Record<string, unknown> = { ...rest, updatedAt: Date.now() };
+  // Firestoreはundefined値を拒否する → 削除
+  for (const k of Object.keys(obj)) {
+    if (obj[k] === undefined) delete obj[k];
+  }
+  return obj;
 }
 
 function fromFirestoreDoc(data: Record<string, unknown>): LocalRecord {
@@ -35,6 +40,8 @@ function fromFirestoreDoc(data: Record<string, unknown>): LocalRecord {
     estimated_profit: typeof data.estimated_profit === 'number' ? data.estimated_profit : undefined,
     raw_transcript: data.raw_transcript ? String(data.raw_transcript) : undefined,
     location_id: data.location_id ? String(data.location_id) : undefined,
+    narrative: data.narrative ? String(data.narrative) : undefined,
+    insight: data.insight ? String(data.insight) : undefined,
     synced: true,
     timestamp: Number(data.timestamp ?? 0),
   };
@@ -65,6 +72,7 @@ async function pushRecordsBatch(uid: string, recs: LocalRecord[]): Promise<void>
     const chunk = recs.slice(i, i + BATCH_LIMIT);
     const batch = writeBatch(db);
     for (const rec of chunk) {
+      if (!rec.id) continue; // 空IDスキップ
       const ref = doc(db, 'users', uid, 'records', rec.id);
       batch.set(ref, toFirestoreDoc(rec));
     }
