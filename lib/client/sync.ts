@@ -25,7 +25,7 @@ function fromFirestoreDoc(data: Record<string, unknown>): LocalRecord {
     location: String(data.location ?? ''),
     house_data: (data.house_data as LocalRecord['house_data']) ?? null,
     work_log: String(data.work_log ?? ''),
-    plant_status: String(data.plant_status ?? '良好'),
+    plant_status: String(data.plant_status ?? ''),
     advice: String(data.advice ?? ''),
     admin_log: String(data.admin_log ?? ''),
     fertilizer: String(data.fertilizer ?? ''),
@@ -76,7 +76,17 @@ async function pushRecordsBatch(uid: string, recs: LocalRecord[]): Promise<void>
       const ref = doc(db, 'users', uid, 'records', rec.id);
       batch.set(ref, toFirestoreDoc(rec));
     }
-    await batch.commit();
+    try {
+      await batch.commit();
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string };
+      console.error('[pushRecordsBatch] batch.commit failed', {
+        code: err.code, message: err.message,
+        chunkIndex: i / BATCH_LIMIT,
+        ids: chunk.map(r => r.id),
+      });
+      throw e;
+    }
   }
 }
 
@@ -113,34 +123,46 @@ function mergeRecords(local: LocalRecord[], remote: LocalRecord[]): { merged: Lo
 /* ── Force Sync: backup → pull → merge → 全件push → 統合結果返却 ── */
 
 export async function forceSync(uid: string): Promise<{ merged: LocalRecord[]; pushed: number }> {
-  backupRecords();
-  const [remote, local] = await Promise.all([
-    pullRecords(uid),
-    Promise.resolve(loadRecs()),
-  ]);
+  try {
+    backupRecords();
+    const [remote, local] = await Promise.all([
+      pullRecords(uid),
+      Promise.resolve(loadRecs()),
+    ]);
 
-  const { merged } = mergeRecords(local, remote);
+    const { merged } = mergeRecords(local, remote);
 
-  // 差分ではなく merged 全件をクラウドへ送信
-  await pushRecordsBatch(uid, merged);
+    // 差分ではなく merged 全件をクラウドへ送信
+    await pushRecordsBatch(uid, merged);
 
-  return { merged, pushed: merged.length };
+    return { merged, pushed: merged.length };
+  } catch (e: unknown) {
+    const err = e as { code?: string; message?: string };
+    console.error('[forceSync] failed', { code: err.code, message: err.message });
+    throw e;
+  }
 }
 
 /* ── Full Sync: backup → pull → merge → push差分 → 統合結果返却 ── */
 
 export async function fullSync(uid: string): Promise<LocalRecord[]> {
-  backupRecords();
-  const [remote, local] = await Promise.all([
-    pullRecords(uid),
-    Promise.resolve(loadRecs()),
-  ]);
+  try {
+    backupRecords();
+    const [remote, local] = await Promise.all([
+      pullRecords(uid),
+      Promise.resolve(loadRecs()),
+    ]);
 
-  const { merged, toPush } = mergeRecords(local, remote);
+    const { merged, toPush } = mergeRecords(local, remote);
 
-  if (toPush.length > 0) {
-    await pushRecordsBatch(uid, toPush);
+    if (toPush.length > 0) {
+      await pushRecordsBatch(uid, toPush);
+    }
+
+    return merged;
+  } catch (e: unknown) {
+    const err = e as { code?: string; message?: string };
+    console.error('[fullSync] failed', { code: err.code, message: err.message });
+    throw e;
   }
-
-  return merged;
 }

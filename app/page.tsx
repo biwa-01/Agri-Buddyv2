@@ -483,7 +483,7 @@ export default function AgriBuddy() {
       if (dur) {
         const hm = dur.match(/(\d+)/);
         if (hm && parseInt(hm[1]) >= 4) {
-          speak('ながい作業、おつかれさま。むりは禁物。15分やすみませんか？');
+          try { speak('ながい作業、おつかれさま。むりは禁物。15分やすみませんか？'); } catch { /* noop */ }
         }
       }
     } catch (err) {
@@ -1255,7 +1255,7 @@ export default function AgriBuddy() {
           const skipMsg = d.confidence === 'high'
             ? 'バッチリ全部入ってます！確認画面へいきますね。'
             : '確認画面へいきますね。';
-          speak(skipMsg);
+          try { await speak(skipMsg); } catch { /* TTS failure must not block UI */ }
           showConfirmScreen();
         }
       } catch (err) {
