@@ -26,7 +26,7 @@ import { fetchWeather, fetchTomorrowWeather } from '@/lib/logic/weather';
 import { buildConsultationSheet } from '@/lib/logic/report';
 import { speak, createRecog, invalidateRecogCache, isIOS } from '@/lib/client/speech';
 import {
-  loadRecs, saveRecLS, deleteRecLS, backupRecords, markSync, getUnsynced, saveAllRecs,
+  loadRecs, saveRecLS, deleteRecLS, backupRecords,
   loadSession, saveSession, sanitizeRecords, deepClean,
   saveMediaBlob, loadMediaForRecord, updateMediaRecordId,
   getCalDays, saveMoodEntry,
@@ -43,16 +43,16 @@ import { FollowUpBar } from '@/components/features/FollowUpBar';
 import { TabBar } from '@/components/features/TabBar';
 import { EmpathyCard } from '@/components/features/EmpathyCard';
 import { useAuth } from '@/lib/client/auth';
-import { fullSync, forceSync, pushRecord } from '@/lib/client/sync';
+import { pushRecord } from '@/lib/client/sync';
 import { LoginButton } from '@/components/features/LoginButton';
 import { SyncBanner } from '@/components/features/SyncBanner';
+import { useSync } from '@/hooks/useSync';
 
 /* ═══════════════════════════════════════════
    Main Component
    ═══════════════════════════════════════════ */
 export default function AgriBuddy() {
   const { user } = useAuth();
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'done' | 'error'>('idle');
   const [mounted, setMounted] = useState(false);
   const [phase, setPhase] = useState<Phase>('IDLE');
   const [view, setView] = useState<View>('record');
@@ -65,8 +65,10 @@ export default function AgriBuddy() {
   const [todayLog, setTodayLog] = useState('');
   const [bump, setBump] = useState<string[] | null>(null);
   const [confidence, setConfidence] = useState<'low' | 'medium' | 'high' | null>(null);
-  const [isOnline, setIsOnline] = useState(true);
-  const [pendSync, setPendSync] = useState(0);
+  // histVer bumpはuseSync→useCalendarの両方で必要
+  const [histVer, setHistVer] = useState(0);
+  const bumpHistVer = useCallback(() => setHistVer(v => v + 1), []);
+  const { syncStatus, isOnline, pendSync, setPendSync, syncRecs, handleForceSync } = useSync(user, mounted, bumpHistVer);
   const [lastSess, setLastSess] = useState<LastSession | null>(null);
   const [curLoc, setCurLoc] = useState('');
   const [photoCount, setPhotoCount] = useState(0);
@@ -81,7 +83,6 @@ export default function AgriBuddy() {
   // Calendar
   const [calMonth, setCalMonth] = useState(() => new Date());
   const [calDate, setCalDate] = useState<string | null>(null);
-  const [histVer, setHistVer] = useState(0);
 
   // Report
   const [showReport, setShowReport] = useState(false);
@@ -167,7 +168,6 @@ export default function AgriBuddy() {
   const textPrefixRef = useRef('');           // 自動再起動時のテキスト蓄積用
 
   const phaseRef = useRef<Phase>('IDLE');
-  const syncingRef = useRef(false);
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => { convRef.current = conv; }, [conv]);
@@ -276,8 +276,6 @@ export default function AgriBuddy() {
     migrateLocations();
     setLocationOptions(getLocationNames());
     fetchWeather().then(setOutdoor);
-    setIsOnline(navigator.onLine);
-    setPendSync(getUnsynced().length);
     // HTTPS誘導: 非localhostかつ非secureの場合、HTTPS URLを案内
     if (!window.isSecureContext && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
       setHttpsRedirectUrl(`https://${location.hostname}:3001${location.pathname}`);
@@ -287,72 +285,8 @@ export default function AgriBuddy() {
       prev.location = sanitizeLocation(prev.location);
       setLastSess(prev); setCurLoc(prev.location || '');
     }
-    const on = () => { setIsOnline(true); syncRecs(); };
-    const off = () => setIsOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const syncRecs = useCallback(async () => {
-    if (!user) {
-      // 未ログイン: 旧挙動（ローカルmarkSync）
-      const u = getUnsynced(); if (u.length === 0) return;
-      u.forEach(r => markSync(r.id)); setPendSync(0);
-      return;
-    }
-    if (syncingRef.current) return; // 排他ロック
-    syncingRef.current = true;
-    setSyncStatus('syncing');
-    try {
-      const TIMEOUT = 15_000;
-      const merged = await Promise.race([
-        fullSync(user.uid),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('sync timeout')), TIMEOUT)),
-      ]);
-      saveAllRecs(merged);
-      setPendSync(0);
-      setHistVer(v => v + 1);
-      setSyncStatus('done');
-    } catch (err) {
-      console.error('[sync]', err);
-      setSyncStatus('error');
-      setPendSync(getUnsynced().length);
-    } finally {
-      syncingRef.current = false;
-    }
-  }, [user]);
-
-  const handleForceSync = useCallback(async () => {
-    if (!user) return;
-    if (syncingRef.current) return; // 排他ロック
-    if (!window.confirm('ローカルデータをクラウドへ統合しますか？')) return;
-    syncingRef.current = true;
-    setSyncStatus('syncing');
-    try {
-      const TIMEOUT = 15_000;
-      const { merged, pushed } = await Promise.race([
-        forceSync(user.uid),
-        new Promise<never>((_, rej) => setTimeout(() => rej(new Error('forceSync timeout')), TIMEOUT)),
-      ]);
-      saveAllRecs(merged);
-      setPendSync(0);
-      setHistVer(v => v + 1);
-      setSyncStatus('done');
-      alert(`${pushed}件の送信を完了しました`);
-    } catch (err) {
-      console.error('[forceSync]', err);
-      setSyncStatus('error');
-      alert('同期に失敗しました');
-    } finally {
-      syncingRef.current = false;
-    }
-  }, [user]);
-
-  useEffect(() => { if (isOnline && mounted) syncRecs(); }, [isOnline, mounted, syncRecs]);
-  // ログイン完了時の自動同期
-  useEffect(() => { if (user && mounted) syncRecs(); }, [user, mounted]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const clr = useCallback(() => {
     if (silRef.current) { clearTimeout(silRef.current); silRef.current = null; }
