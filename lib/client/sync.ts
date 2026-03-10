@@ -42,6 +42,7 @@ function fromFirestoreDoc(data: Record<string, unknown>): LocalRecord {
     location_id: data.location_id ? String(data.location_id) : undefined,
     narrative: data.narrative ? String(data.narrative) : undefined,
     insight: data.insight ? String(data.insight) : undefined,
+    plant_variety: data.plant_variety ? String(data.plant_variety) : undefined,
     synced: true,
     timestamp: Number(data.timestamp ?? 0),
   };

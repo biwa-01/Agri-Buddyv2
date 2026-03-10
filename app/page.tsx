@@ -426,6 +426,7 @@ export default function AgriBuddy() {
       photo_count: rec.photo_count,
       narrative: rec.narrative,
       insight: rec.insight,
+      plant_variety: rec.plant_variety,
     };
 
     const card: ConfirmCard = {
@@ -588,6 +589,7 @@ export default function AgriBuddy() {
           work_duration: d.work_duration || '', fuel_cost: d.fuel_cost || '',
           strategic_advice: d.strategic_advice || '', pesticide_detail: d.pesticide_detail || '',
           narrative: d.narrative || undefined, insight: d.insight || undefined,
+          plant_variety: d.plant_variety || undefined,
           photo_count: d.photo_count ?? 0, estimated_profit: d.estimated_profit ?? undefined,
           raw_transcript: d.raw_transcript || undefined, location_id: locMaster?.id,
           synced: false, timestamp: Date.now(),
@@ -629,6 +631,7 @@ export default function AgriBuddy() {
             strategic_advice: pl.strategic_advice || generateStrategicAdvice(slots),
             pesticide_detail: pl.pesticide_detail || '',
             narrative: d.narrative || undefined, insight: d.insight || undefined,
+            plant_variety: pl.plant_variety || d.plant_variety || undefined,
             photo_count: 0,
             raw_transcript: d.raw_transcript || undefined,
             location_id: locMaster?.id,
@@ -668,6 +671,7 @@ export default function AgriBuddy() {
           fuel_cost: d.fuel_cost || '', strategic_advice: strategicText,
           pesticide_detail: d.pesticide_detail || '',
           narrative: d.narrative || undefined, insight: d.insight || undefined,
+          plant_variety: d.plant_variety || undefined,
           photo_count: photoCount, estimated_profit: profit.total,
           raw_transcript: d.raw_transcript || undefined,
           location_id: locMaster?.id,
@@ -1509,6 +1513,8 @@ export default function AgriBuddy() {
               isEditMode={editingRecordIds.length > 0}
               narrative={confirmNarrative}
               onNarrativeChange={updateNarrative}
+              plantVariety={pendingDataRef.current.plant_variety || ''}
+              onPlantVarietyChange={(v) => { pendingDataRef.current.plant_variety = v; setConfirmNarrative(n => n); }}
             />
           )}
 

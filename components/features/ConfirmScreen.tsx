@@ -18,9 +18,11 @@ interface ConfirmScreenProps {
   isEditMode?: boolean;
   narrative?: string;
   onNarrativeChange?: (value: string) => void;
+  plantVariety?: string;
+  onPlantVarietyChange?: (value: string) => void;
 }
 
-export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard, onDateChange, onSave, onReset, onDeleteCard, saving, isEditMode, narrative, onNarrativeChange }: ConfirmScreenProps) {
+export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard, onDateChange, onSave, onReset, onDeleteCard, saving, isEditMode, narrative, onNarrativeChange, plantVariety, onPlantVarietyChange }: ConfirmScreenProps) {
   return (
     <section className="mx-5 mb-4 fade-up">
       <div className={`p-5 rounded-2xl ${GLASS}`}>
@@ -40,6 +42,19 @@ export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard
               onChange={e => onNarrativeChange?.(e.target.value)}
               rows={3}
               className="w-full text-lg font-medium text-stone-900 bg-white border border-stone-200 rounded-xl p-3 resize-y focus:outline-none focus:ring-2 focus:ring-amber-400 font-serif leading-relaxed"
+            />
+          </div>
+        )}
+
+        {/* 品種 */}
+        {plantVariety != null && plantVariety !== '' && (
+          <div className="mb-4 p-3 rounded-xl bg-green-50/80 border border-green-200/50">
+            <label className="block text-xs font-bold text-green-700 mb-1">品種</label>
+            <input
+              type="text" value={plantVariety}
+              onChange={e => onPlantVarietyChange?.(e.target.value)}
+              className="w-full bg-transparent text-base text-green-900 outline-none"
+              placeholder="品種名"
             />
           </div>
         )}

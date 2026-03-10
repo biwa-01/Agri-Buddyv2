@@ -60,6 +60,7 @@ export function buildRecordChips(rec: LocalRecord): { label: string; color: stri
   if (rec.pest_status && !isNegativeInput(rec.pest_status))
     chips.push({ label: rec.pest_status, color: 'red' });
   if (rec.work_duration) chips.push({ label: rec.work_duration, color: 'purple' });
+  if (rec.plant_variety) chips.push({ label: rec.plant_variety, color: 'emerald' });
   return chips;
 }
 
@@ -165,6 +166,7 @@ export function buildSlotsFromPending(d: Record<string, any>): PartialSlots {
     pesticide_detail: d.pesticide_detail,
     harvest_amount: d.harvest_amount, material_cost: d.material_cost,
     work_duration: d.work_duration, fuel_cost: d.fuel_cost,
+    plant_variety: d.plant_variety,
   };
   if (d.house_data) {
     if (d.house_data.max_temp !== null) slots.max_temp = d.house_data.max_temp;
@@ -188,6 +190,7 @@ const CORRECTION_LABEL_MAP: Record<string, string> = {
   '資材費': 'material_cost', '資材': 'material_cost',
   '燃料費': 'fuel_cost', '燃料': 'fuel_cost',
   '作業時間': 'work_duration', '時間': 'work_duration',
+  '品種': 'plant_variety', 'ひんしゅ': 'plant_variety',
 };
 
 const NEGATIVE_CORRECTION_RE = /なし|ない|やってない|ません|ゼロ|０|なかった/;

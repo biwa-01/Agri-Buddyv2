@@ -16,6 +16,7 @@ export interface PartialSlots {
   harvest_amount?: string; material_cost?: string;
   work_duration?: string; fuel_cost?: string;
   location?: string;
+  plant_variety?: string;
 }
 
 export type MissingQuestionKey = 'WORK' | 'HOUSE_TEMP' | 'FERTILIZER' | 'PEST' | 'HARVEST' | 'COST' | 'DURATION';
@@ -37,6 +38,7 @@ export interface PerLocationRecord {
   plant_status?: string;
   advice?: string;
   strategic_advice?: string;
+  plant_variety?: string;
 }
 
 export interface ConfirmCard {
@@ -63,6 +65,7 @@ export interface ApiResponse {
   pesticide_detail?: string;
   narrative?: string;
   insight?: string;
+  plant_variety?: string;
   new_location?: string;
   error?: string;
   mentor_mode?: boolean;
@@ -83,6 +86,7 @@ export interface LocalRecord {
   strategic_advice: string; photo_count: number;
   pesticide_detail?: string;
   narrative?: string; insight?: string;
+  plant_variety?: string;
   estimated_profit?: number; raw_transcript?: string;
   location_id?: string;
   synced: boolean; timestamp: number;
