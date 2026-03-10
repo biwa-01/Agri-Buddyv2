@@ -9,7 +9,7 @@ import {
 import type {
   ConvMessage, HouseData, ApiResponse,
   Phase, View, OutdoorWeather, LocalRecord, LastSession,
-  FollowUpStep, ConfirmCard, EmotionAnalysis,
+  FollowUpStep, ConfirmCard,
 } from '@/lib/types';
 import {
   APP_NAME, MAX_LISTEN_MS, BREATHING_MS,
@@ -47,6 +47,9 @@ import { LoginButton } from '@/components/features/LoginButton';
 import { SyncBanner } from '@/components/features/SyncBanner';
 import { useSync } from '@/hooks/useSync';
 import { useCalendar } from '@/hooks/useCalendar';
+import { useReport } from '@/hooks/useReport';
+import { useCelebration } from '@/hooks/useCelebration';
+import { useMentor } from '@/hooks/useMentor';
 
 /* ═══════════════════════════════════════════
    Main Component
@@ -89,10 +92,7 @@ export default function AgriBuddy() {
   } = useCalendar(mounted, histVer);
 
   // Report
-  const [showReport, setShowReport] = useState(false);
-  const [reportText, setReportText] = useState('');
-  const [reportType, setReportType] = useState<'month' | 'half'>('month');
-  const [reportFullscreen, setReportFullscreen] = useState(false);
+  const { showReport, setShowReport, reportText, reportType, reportFullscreen, setReportFullscreen, handleShowReport } = useReport();
 
   // Follow-up state machine
   const [followUpInfo, setFollowUpInfo] = useState<{ label: string; current: number; total: number } | null>(null);
@@ -108,14 +108,13 @@ export default function AgriBuddy() {
   // Save-time Gemini wait
   const [saving, setSaving] = useState(false);
 
-  // Mentor mode
-  const [mentorDraft, setMentorDraft] = useState('');
-  const [mentorCopied, setMentorCopied] = useState(false);
-  const [mentorStep, setMentorStep] = useState<'comfort' | 'ask' | 'sheet'>('comfort');
-  const [consultSheet, setConsultSheet] = useState('');
-
-  // Profit preview
-  const [profitPreview, setProfitPreview] = useState<{ total: number; details: string[]; message: string; praise: string; marketTip: string } | null>(null);
+  // Mentor & emotion
+  const {
+    mentorDraft, setMentorDraft, mentorCopied, setMentorCopied,
+    mentorStep, setMentorStep, consultSheet, setConsultSheet,
+    empathyCard, setEmpathyCard,
+    sosDetectedRef, tier2DetectedRef, normalEmotionRef,
+  } = useMentor();
 
   // Media
   const [mediaPreview, setMediaPreview] = useState<{ url: string; type: string }[]>([]);
@@ -125,10 +124,11 @@ export default function AgriBuddy() {
   const [ocrLoading, setOcrLoading] = useState(false);
   const ocrInputRef = useRef<HTMLInputElement>(null);
 
-  // Celebration
-  const [showCelebration, setShowCelebration] = useState(false);
-  const [celebExiting, setCelebExiting] = useState(false);
-  const [celebrationProfit, setCelebrationProfit] = useState(0);
+  // Celebration & profit
+  const {
+    showCelebration, celebExiting, celebrationProfit,
+    profitPreview, setProfitPreview, triggerCelebration,
+  } = useCelebration();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recogRef = useRef<any>(null);
@@ -152,10 +152,6 @@ export default function AgriBuddy() {
   const followUpIndexRef = useRef(0);
   const followUpQueueRef = useRef<FollowUpStep[]>([]);
   const isFirstQuestionRef = useRef(false);
-  const sosDetectedRef = useRef(false);
-  const tier2DetectedRef = useRef<EmotionAnalysis | null>(null);
-  const normalEmotionRef = useRef<EmotionAnalysis | null>(null);
-  const [empathyCard, setEmpathyCard] = useState<EmotionAnalysis | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pendingDataRef = useRef<Record<string, any>>({});
   const advanceFollowUpRef = useRef<() => void>(() => {});
@@ -533,7 +529,7 @@ export default function AgriBuddy() {
     }
 
     setLocationOptions(getLocationNames());
-    setHistVer(v => v + 1);
+    bumpHistVer();
     setPhotoCount(0);
     setConfirmCards([]);
     setRecordDate('');
@@ -563,7 +559,7 @@ export default function AgriBuddy() {
 
     if (sosDetectedRef.current) {
       sosDetectedRef.current = false;
-      setShowCelebration(false);
+
       setPhase('MENTOR');
       setMentorCopied(false);
       setMentorStep('comfort');
@@ -593,7 +589,7 @@ export default function AgriBuddy() {
       tier2DetectedRef.current = null;
       saveMoodEntry(empEmotion, outdoor);
       setEmpathyCard(empEmotion);
-      setShowCelebration(false);
+
       setProfitPreview(null);
       const msg = 'きょうもおつかれさま。';
       setAiReply(msg); setPhase('IDLE'); setView('history');
@@ -603,13 +599,7 @@ export default function AgriBuddy() {
     }
 
     const profit = calculateProfitPreview(pendingDataRef.current);
-    setCelebrationProfit(profit.total);
-    setShowCelebration(true);
-    setCelebExiting(false);
-    setTimeout(() => {
-      setCelebExiting(true);
-      setTimeout(() => { setShowCelebration(false); setCelebExiting(false); }, 400);
-    }, 4600);
+    triggerCelebration(profit.total);
 
     if (profit.total > 0) {
       const yen = profit.total >= 10000 ? `${(profit.total / 10000).toFixed(1)}万円` : `${profit.total.toLocaleString()}円`;
@@ -1253,10 +1243,6 @@ export default function AgriBuddy() {
     }
   }, [phase, startListen, begin, conv.length, todayHouse, bump]);
 
-  const handleShowReport = useCallback((text: string, type: 'month' | 'half') => {
-    setReportText(text); setReportType(type); setShowReport(true); setReportFullscreen(true);
-  }, []);
-
   const handleCleanLocations = useCallback(() => {
     const count = cleanUnusedLocations();
     setLocationOptions(getLocationNames());
@@ -1271,7 +1257,7 @@ export default function AgriBuddy() {
         localStorage.removeItem(SK_SESSION);
         localStorage.removeItem(SK_DEEP_CLEANED);
         localStorage.removeItem(SK_ALIAS_MAP);
-        setHistVer(v => v + 1);
+        bumpHistVer();
         setCalDate(null);
       }
     }
