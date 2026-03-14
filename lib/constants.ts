@@ -2,6 +2,7 @@ import type { FollowUpStep } from '@/lib/types';
 
 export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME || 'Agri-Buddy';
 export const MAX_LISTEN_MS = 120000;
+export const NO_SPEECH_TIMEOUT_MS = 10000;
 export const BREATHING_MS = 1500;
 export const SK_RECORDS = 'agri-buddy-records';
 export const SK_SESSION = 'agri-buddy-last-session';

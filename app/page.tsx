@@ -12,7 +12,7 @@ import type {
   FollowUpStep, ConfirmCard,
 } from '@/lib/types';
 import {
-  APP_NAME, MAX_LISTEN_MS, BREATHING_MS,
+  APP_NAME, MAX_LISTEN_MS, NO_SPEECH_TIMEOUT_MS, BREATHING_MS,
   SK_RECORDS, SK_SESSION, SK_DEEP_CLEANED, SK_ALIAS_MAP,
   GLASS, CARD_FLAT, CARD_ACCENT,
   GUIDED_QUESTIONS,
@@ -136,6 +136,7 @@ export default function AgriBuddy() {
   const convRef = useRef<ConvMessage[]>([]);
   const silRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noSpeechRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ptrRef = useRef(0);
   const lpRef = useRef(false);
   const sasRef = useRef<() => void>(() => {});
@@ -196,6 +197,7 @@ export default function AgriBuddy() {
   const clr = useCallback(() => {
     if (silRef.current) { clearTimeout(silRef.current); silRef.current = null; }
     if (maxRef.current) { clearTimeout(maxRef.current); maxRef.current = null; }
+    if (noSpeechRef.current) { clearTimeout(noSpeechRef.current); noSpeechRef.current = null; }
   }, []);
 
   useEffect(() => () => { persistentRecogRef.current = false; try { recogRef.current?.stop(); } catch {} recogRef.current = null; invalidateRecogCache(); clr(); window.speechSynthesis?.cancel(); }, [clr]);
@@ -648,6 +650,14 @@ export default function AgriBuddy() {
       setTranscript('');
       clr();
       maxRef.current = setTimeout(() => { sasRef.current(); }, MAX_LISTEN_MS);
+      // 無音タイムアウト: 10秒以内に発話がなければFOLLOW_UP画面に戻す
+      noSpeechRef.current = setTimeout(() => {
+        if (!chunksRef.current) {
+          setTranscript('聞き取れませんでした。マイクをタップしてください');
+          setPhase('FOLLOW_UP');
+          clr();
+        }
+      }, NO_SPEECH_TIMEOUT_MS);
       return;
     }
 
@@ -672,7 +682,8 @@ export default function AgriBuddy() {
         let t = '';
         for (let i = resultOffsetRef.current; i < e.results.length; i++) t += e.results[i][0].transcript;
         t = correctAgriTerms(t);
-        chunksRef.current = textPrefixRef.current + t; setTranscript(textPrefixRef.current + t); spoke = true;
+        chunksRef.current = textPrefixRef.current + t; setTranscript(textPrefixRef.current + t);
+        if (!spoke) { spoke = true; if (noSpeechRef.current) { clearTimeout(noSpeechRef.current); noSpeechRef.current = null; } }
       };
       r.onerror = (e: any) => {
         if (e.error === 'not-allowed') {
@@ -792,6 +803,20 @@ export default function AgriBuddy() {
           try { recogRef.current?.stop(); } catch {}
         }
       }, MAX_LISTEN_MS);
+      // 無音タイムアウト: 10秒以内に発話がなければIDLEに戻す
+      noSpeechRef.current = setTimeout(() => {
+        if (!spoke && recogRef.current) {
+          try { recogRef.current.stop(); } catch {}
+          recogRef.current = null;
+          clr();
+          setTranscript('聞き取れませんでした。マイクをタップしてください');
+          if (followUpActiveRef.current) {
+            setPhase('FOLLOW_UP');
+          } else {
+            setPhase('IDLE');
+          }
+        }
+      }, NO_SPEECH_TIMEOUT_MS);
     } catch {
       recogRef.current = null;
       invalidateRecogCache();
@@ -1619,7 +1644,7 @@ export default function AgriBuddy() {
               </>
 
               {/* Hidden inputs */}
-              <input ref={photoRef} type="file" accept="image/*,video/*" capture="environment" className="hidden"
+              <input ref={photoRef} type="file" accept="image/*,video/*" className="hidden"
                 onChange={async e => {
                   const files = e.target.files;
                   if (!files?.length) return;
