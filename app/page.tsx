@@ -1373,6 +1373,36 @@ export default function AgriBuddy() {
       {view === 'record' && (
         <div className="view-enter">
 
+          {/* Hidden file inputs — phase外に配置（CONFIRM画面からもアクセス可能） */}
+          <input ref={photoRef} type="file" accept="image/*,video/*" className="hidden"
+            onChange={async e => {
+              const files = e.target.files;
+              if (!files?.length) return;
+              for (let i = 0; i < Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount); i++) {
+                const file = files[i];
+                const mediaType = file.type.startsWith('video') ? 'video' : 'image';
+                try {
+                  await saveMediaBlob(pendingMediaId, file, mediaType);
+                  setMediaPreview(prev => [...prev, { url: URL.createObjectURL(file), type: mediaType }]);
+                } catch { /* IDB save failed, count only */ }
+              }
+              setPhotoCount(p => p + Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount));
+              e.target.value = '';
+              // MEDIAステップで写真撮影後 → 自動で次へ進む
+              if (photoWaitingRef.current) {
+                photoWaitingRef.current = false;
+                setTranscript('');
+                followUpIndexRef.current++;
+                advanceFollowUpRef.current();
+              }
+            }} />
+          <input ref={ocrInputRef} type="file" accept="image/*" className="hidden"
+            onChange={e => {
+              const file = e.target.files?.[0];
+              if (file) handleOcr(file);
+              e.target.value = '';
+            }} />
+
           {/* ═══ MENTOR SCREEN ═══ */}
           {phase === 'MENTOR' && (
             <MentorMode
@@ -1643,35 +1673,7 @@ export default function AgriBuddy() {
                 )}
               </>
 
-              {/* Hidden inputs */}
-              <input ref={photoRef} type="file" accept="image/*,video/*" className="hidden"
-                onChange={async e => {
-                  const files = e.target.files;
-                  if (!files?.length) return;
-                  for (let i = 0; i < Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount); i++) {
-                    const file = files[i];
-                    const mediaType = file.type.startsWith('video') ? 'video' : 'image';
-                    try {
-                      await saveMediaBlob(pendingMediaId, file, mediaType);
-                      setMediaPreview(prev => [...prev, { url: URL.createObjectURL(file), type: mediaType }]);
-                    } catch { /* IDB save failed, count only */ }
-                  }
-                  setPhotoCount(p => p + Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount));
-                  e.target.value = '';
-                  // MEDIAステップで写真撮影後 → 自動で次へ進む
-                  if (photoWaitingRef.current) {
-                    photoWaitingRef.current = false;
-                    setTranscript('');
-                    followUpIndexRef.current++;
-                    advanceFollowUpRef.current();
-                  }
-                }} />
-              <input ref={ocrInputRef} type="file" accept="image/*" className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0];
-                  if (file) handleOcr(file);
-                  e.target.value = '';
-                }} />
+              {/* Hidden inputs は view='record' 直下に移動済み */}
 
               {phase === 'IDLE' && (
                 <>
