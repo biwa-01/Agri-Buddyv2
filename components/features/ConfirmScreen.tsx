@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X, MapPin, Thermometer, Calendar, Trash2, List, Pencil } from 'lucide-react';
+import { Check, X, MapPin, Thermometer, Calendar, Trash2, List, Pencil, Camera, Plus, Video } from 'lucide-react';
 import { GLASS } from '@/lib/constants';
 import type { ConfirmCard } from '@/lib/types';
 
@@ -20,9 +20,14 @@ interface ConfirmScreenProps {
   onNarrativeChange?: (value: string) => void;
   plantVariety?: string;
   onPlantVarietyChange?: (value: string) => void;
+  mediaPreview?: { url: string; type: string }[];
+  photoCount?: number;
+  onAddMedia?: () => void;
+  onRemoveMedia?: (index: number) => void;
+  onMediaTap?: (media: { url: string; type: string }) => void;
 }
 
-export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard, onDateChange, onSave, onReset, onDeleteCard, saving, isEditMode, narrative, onNarrativeChange, plantVariety, onPlantVarietyChange }: ConfirmScreenProps) {
+export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard, onDateChange, onSave, onReset, onDeleteCard, saving, isEditMode, narrative, onNarrativeChange, plantVariety, onPlantVarietyChange, mediaPreview, photoCount, onAddMedia, onRemoveMedia, onMediaTap }: ConfirmScreenProps) {
   return (
     <section className="mx-5 mb-4 fade-up">
       <div className={`p-5 rounded-2xl ${GLASS}`}>
@@ -74,6 +79,56 @@ export function ConfirmScreen({ cards, recordDate, locationOptions, onUpdateCard
               />
             </div>
           ))}
+        </div>
+
+        {/* 写真・動画 */}
+        <div className="mt-4 p-4 rounded-xl bg-stone-50/80 border border-stone-200/50">
+          <label className="flex items-center gap-1.5 text-xs font-bold text-stone-600 mb-3">
+            <Camera className="w-3.5 h-3.5" />写真・動画
+            {(photoCount ?? 0) > 0 && <span className="text-amber-700">（{photoCount}件添付）</span>}
+          </label>
+          {mediaPreview && mediaPreview.length > 0 && (
+            <div className="flex gap-2 flex-wrap mb-3">
+              {mediaPreview.map((m, i) => (
+                <div key={i} className="relative group">
+                  {m.type === 'video' ? (
+                    <div
+                      className="w-20 h-20 rounded-lg border border-stone-200 overflow-hidden cursor-pointer relative"
+                      onClick={() => onMediaTap?.(m)}
+                    >
+                      <video src={m.url} className="w-full h-full object-cover" muted playsInline />
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                        <Video className="w-6 h-6 text-white" />
+                      </div>
+                    </div>
+                  ) : (
+                    <img
+                      src={m.url} alt=""
+                      className="w-20 h-20 object-cover rounded-lg border border-stone-200 cursor-pointer"
+                      onClick={() => onMediaTap?.(m)}
+                    />
+                  )}
+                  {onRemoveMedia && (
+                    <button
+                      onClick={() => onRemoveMedia(i)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center text-xs font-bold shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{ opacity: 1 }}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {onAddMedia && (
+            <button
+              onClick={onAddMedia}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border-2 border-dashed border-stone-300 text-stone-600 text-sm font-bold btn-press hover:border-amber-400 hover:text-amber-700 transition-colors w-full justify-center"
+            >
+              <Plus className="w-4 h-4" /> 写真・動画を追加
+            </button>
+          )}
         </div>
 
         <div className="mt-5 flex gap-3">

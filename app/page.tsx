@@ -1346,6 +1346,15 @@ export default function AgriBuddy() {
               onNarrativeChange={updateNarrative}
               plantVariety={pendingDataRef.current.plant_variety || ''}
               onPlantVarietyChange={(v) => { pendingDataRef.current.plant_variety = v; setConfirmNarrative(n => n); }}
+              mediaPreview={mediaPreview}
+              photoCount={photoCount}
+              onAddMedia={() => photoRef.current?.click()}
+              onRemoveMedia={(i) => {
+                URL.revokeObjectURL(mediaPreview[i].url);
+                setMediaPreview(prev => prev.filter((_, idx) => idx !== i));
+                setPhotoCount(p => Math.max(0, p - 1));
+              }}
+              onMediaTap={(m) => setFullscreenMedia(m)}
             />
           )}
 
