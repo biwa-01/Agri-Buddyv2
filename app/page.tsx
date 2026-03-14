@@ -17,7 +17,7 @@ import {
   GLASS, CARD_FLAT, CARD_ACCENT,
   GUIDED_QUESTIONS,
   MAX_MEDIA_PER_RECORD,
-  NAV_NOISE_RE,
+  NAV_NOISE_RE, PHOTO_RE,
 } from '@/lib/constants';
 import { calcConfidence, generateAdvice, generateStrategicAdvice, generateAdminLog } from '@/lib/logic/advice';
 import { correctAgriTerms, extractChips, detectLocationOverride, calculateProfitPreview, sanitizeLocation, buildSlotsFromPending, normalizeLocationName } from '@/lib/logic/extraction';
@@ -940,6 +940,10 @@ export default function AgriBuddy() {
       if (text) rawTranscriptRef.current.push(text);
 
       const step = followUpQueueRef.current[followUpIndexRef.current];
+      // 音声コマンド「撮って」→カメラ起動
+      if (PHOTO_RE.test(text)) {
+        photoRef.current?.click();
+      }
       // ナビゲーション発言をノイズとして除去してからデータ処理
       const cleaned = text
         .replace(NAV_NOISE_RE, '')
@@ -984,9 +988,14 @@ export default function AgriBuddy() {
     // ── Normal mode ──
     if (!text) { setPhase('IDLE'); return; }
 
+    // 音声コマンド「撮って」→カメラ起動
+    if (PHOTO_RE.test(text)) {
+      photoRef.current?.click();
+    }
+
     // Accumulate raw transcript (original), then strip nav noise for processing
     rawTranscriptRef.current.push(text);
-    const textClean = text.replace(NAV_NOISE_RE, '').replace(/\s{2,}/g, ' ').trim();
+    const textClean = text.replace(NAV_NOISE_RE, '').replace(/写真[を]?撮って|カメラ[を]?起動|撮影して|撮るよ/g, '').replace(/\s{2,}/g, ' ').trim();
     if (!textClean) { setPhase('IDLE'); return; }
 
     // ── Emotion Detection ──
@@ -1564,6 +1573,12 @@ export default function AgriBuddy() {
                     : phase === 'FOLLOW_UP' ? '声で答えてください'
                     : '今日のことを話す'}
                 </p>
+                {(phase === 'IDLE' || phase === 'LISTENING' || phase === 'FOLLOW_UP') && (
+                  <button onClick={() => photoRef.current?.click()}
+                    className="mt-3 flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/20 backdrop-blur-sm border border-white/20 text-white/80 text-base font-bold btn-press hover:bg-white/30 transition-colors">
+                    <Camera className="w-5 h-5" /> 写真を撮る
+                  </button>
+                )}
               </>
 
               {/* Hidden inputs */}
