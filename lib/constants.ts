@@ -78,6 +78,9 @@ export const GUIDED_QUESTIONS: Record<FollowUpStep, string[]> = {
   DETAILS: [
     'ハウスの気温、収穫量、作業時間など、ほかに記録しておきたいことがあれば教えてください。',
   ],
+  MEDIA: [
+    '写真や動画はありますか？あれば撮影できます。なければ「なし」と言ってください。',
+  ],
 };
 
 /* ── pest_status verb stripping ── */

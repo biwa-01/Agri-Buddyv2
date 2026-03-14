@@ -905,7 +905,9 @@ export default function AgriBuddy() {
     if (steps.length === 0 && conf === 'low') {
       steps.push('WORK');
     }
-    return steps.slice(0, 3);
+    // 写真・動画は常に最後に聞く
+    steps.push('MEDIA');
+    return steps;
   };
 
   /* ── Stop & Send ── */
@@ -954,6 +956,32 @@ export default function AgriBuddy() {
       if (!isSkip && cleaned.length > 0 && cleaned.length <= 2 && step === 'MATERIALS') {
         setTranscript('もう一度お願いします');
         setPhase('FOLLOW_UP');
+        return;
+      }
+
+      // MEDIAステップ: 「ある」→カメラ起動して待機、「ない/なし」→次へ
+      if (step === 'MEDIA') {
+        const NO_MEDIA_RE = /な(い|し)|ありません|いらない|不要|大丈夫|スキップ|いいえ/;
+        const YES_MEDIA_RE = /ある|あります|撮(る|ります|って|影)|はい|うん|カメラ|写真|動画/;
+        if (NO_MEDIA_RE.test(text)) {
+          emptyRetryRef.current = 0;
+          setTranscript('');
+          followUpIndexRef.current++;
+          advanceFollowUpRef.current();
+        } else if (YES_MEDIA_RE.test(text) || PHOTO_RE.test(text)) {
+          photoRef.current?.click();
+          // カメラ起動後、自動で次へ進む（写真選択後にonChangeで処理される）
+          photoWaitingRef.current = true;
+          setTranscript('撮影してください');
+          setPhase('FOLLOW_UP');
+        } else if (!isSkip) {
+          // よくわからない返答 → もう一度聞く
+          setTranscript('「ある」か「ない」で答えてください');
+          setPhase('FOLLOW_UP');
+        } else {
+          setTranscript('');
+          setPhase('FOLLOW_UP');
+        }
         return;
       }
 
@@ -1605,6 +1633,13 @@ export default function AgriBuddy() {
                   }
                   setPhotoCount(p => p + Math.min(files.length, MAX_MEDIA_PER_RECORD - photoCount));
                   e.target.value = '';
+                  // MEDIAステップで写真撮影後 → 自動で次へ進む
+                  if (photoWaitingRef.current) {
+                    photoWaitingRef.current = false;
+                    setTranscript('');
+                    followUpIndexRef.current++;
+                    advanceFollowUpRef.current();
+                  }
                 }} />
               <input ref={ocrInputRef} type="file" accept="image/*" className="hidden"
                 onChange={e => {

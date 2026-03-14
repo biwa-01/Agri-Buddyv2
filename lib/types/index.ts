@@ -94,7 +94,7 @@ export interface LocalRecord {
 
 export interface LastSession { location: string; work: string; date: string; }
 
-export type FollowUpStep = 'LOCATION' | 'WORK' | 'MATERIALS' | 'DETAILS';
+export type FollowUpStep = 'LOCATION' | 'WORK' | 'MATERIALS' | 'DETAILS' | 'MEDIA';
 
 export interface ConfirmItem {
   key: string;
