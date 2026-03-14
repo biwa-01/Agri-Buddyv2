@@ -2,11 +2,14 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export const GEMINI_MODEL = "gemini-2.5-flash-lite";
 
-export function getGeminiModel() {
+export function getGeminiModel(systemInstruction?: string) {
   const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   if (!apiKey) throw new Error("APIキーが未設定です");
   const genAI = new GoogleGenerativeAI(apiKey);
-  return genAI.getGenerativeModel({ model: GEMINI_MODEL });
+  return genAI.getGenerativeModel({
+    model: GEMINI_MODEL,
+    ...(systemInstruction ? { systemInstruction } : {}),
+  });
 }
 
 /** 429時にretryDelayを読んで1回リトライ。それ以外のエラーはそのままthrow */

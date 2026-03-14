@@ -25,61 +25,46 @@ export async function POST(req: NextRequest) {
     }
 
     // ─── Gemini API ───
-    const model = getGeminiModel();
-
-    const contextStr = (context || [])
-      .map(m => `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${m.text}`)
-      .join('\n');
-
     const { SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES, VALIDATION_RULES, EXTRACTION_RULES, ADMIN_LOG_RULES, ADVICE_RULES, REVENUE_ESTIMATION_RULES, NARRATIVE_RULES, OUTPUT_SCHEMA } = GEMINI_PROMPT_SECTIONS;
-
-    const weatherSection = outdoor
-      ? `\n【本日の天気】${outdoor.description} ${outdoor.temperature}℃\n`
-      : '';
-
-    const multiLocations = locations && locations.length >= 2;
-    const locationSection = multiLocations
-      ? `\n【記録対象の場所（複数）】${locations.join(', ')}\n※ per_location配列で場所ごとに分離して返すこと。各場所にwork_log, admin_log, house_data, fertilizer, pest_status, pesticide_detail, harvest_amount等を個別に割り当てる。\n`
-      : location
-        ? `\n【現在の記録場所】${location}\n`
-        : '';
 
     const locList = (knownLocations && knownLocations.length > 0)
       ? knownLocations.join(', ')
       : 'なし（初回利用）';
     const extractionWithLocs = EXTRACTION_RULES.replace('{locationList}', locList);
 
-    const prompt = `
-${SYSTEM_ROLE}
+    // 静的ルールはsystemInstructionに分離（Gemini側でキャッシュ→高速化）
+    const systemInstruction = [
+      SYSTEM_ROLE, LOCATION_RULES, DATA_CLEANING_RULES, SILENT_COMPLETION_RULES,
+      VALIDATION_RULES, extractionWithLocs, ADMIN_LOG_RULES, ADVICE_RULES,
+      REVENUE_ESTIMATION_RULES, NARRATIVE_RULES, OUTPUT_SCHEMA,
+    ].join('\n\n');
 
-${LOCATION_RULES}
+    const model = getGeminiModel(systemInstruction);
 
-${DATA_CLEANING_RULES}
+    const contextStr = (context || [])
+      .map(m => `${m.role === 'user' ? 'ユーザー' : 'AI'}: ${m.text}`)
+      .join('\n');
 
-${SILENT_COMPLETION_RULES}
+    const weatherSection = outdoor
+      ? `【本日の天気】${outdoor.description} ${outdoor.temperature}℃\n`
+      : '';
 
-${VALIDATION_RULES}
+    const multiLocations = locations && locations.length >= 2;
+    const locationSection = multiLocations
+      ? `【記録対象の場所（複数）】${locations.join(', ')}\n※ per_location配列で場所ごとに分離して返すこと。各場所にwork_log, admin_log, house_data, fertilizer, pest_status, pesticide_detail, harvest_amount等を個別に割り当てる。\n`
+      : location
+        ? `【現在の記録場所】${location}\n`
+        : '';
 
-${extractionWithLocs}
-
-${ADMIN_LOG_RULES}
-
-${ADVICE_RULES}
-
-${REVENUE_ESTIMATION_RULES}
-
-${NARRATIVE_RULES}
-${weatherSection}${locationSection}
+    // 動的部分のみをユーザーメッセージとして送信
+    const prompt = `${weatherSection}${locationSection}
 【会話履歴】
 ${contextStr}
 
 【今回のユーザー入力（原文）】
-"${text || ''}"
+"${text || ''}"`;
 
-${OUTPUT_SCHEMA}
-`;
-
-    console.log('[diagnose] prompt:', prompt.length, 'chars');
+    console.log('[diagnose] system:', systemInstruction.length, 'chars, prompt:', prompt.length, 'chars');
 
     // 30秒タイムアウト + 429リトライ
     const callGemini = async () => {
